@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+packages/*/dist/
+
+# state / local
+.myagent/
+.habor/
+*.log
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/

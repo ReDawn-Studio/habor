@@ -1,0 +1,18 @@
+{
+  "name": "agent-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "原生 Agent 聚合平台 — 用户只选模型，任务自动跑在对应厂商的原生 harness 里",
+  "type": "module",
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "cli": "pnpm --filter @agent-router/cli start",
+    "habor": "pnpm --filter @agent-router/cli start"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0"
+  }
+}
