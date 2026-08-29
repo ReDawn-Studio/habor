@@ -10,7 +10,7 @@
  *
  * 会话绑定 → 实时 Session 对象 由本层持有（SessionRegistry）。
  */
-import type { Adapter, AgentEvent, Session } from "./types.js";
+import type { Adapter, AgentEvent, Session } from "@agent-router/core";
 import type { Registry } from "./registry.js";
 import { TaskStore, type SessionBinding, type Task } from "./state.js";
 
@@ -29,6 +29,16 @@ export class TaskRouter {
     opts: TaskRouterOptions = {}
   ) {
     this.stateFile = opts.stateFile;
+  }
+
+  /** 模型可用性（委托给 Registry；CLI/IDE 用）。 */
+  async isModelAvailable(model: string): Promise<boolean> {
+    return this.registry.isModelAvailable(model);
+  }
+
+  /** 可用模型列表（委托给 Registry）。 */
+  async listAvailableModels(): Promise<string[]> {
+    return this.registry.listAvailableModels();
   }
 
   /** 当前任务列表（State 层查询）。 */

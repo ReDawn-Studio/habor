@@ -32,6 +32,9 @@ importers:
       '@agent-router/core':
         specifier: workspace:*
         version: link:../core
+      '@agent-router/router':
+        specifier: workspace:*
+        version: link:../router
 
   packages/core: {}
 
@@ -40,6 +43,12 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: ^1.4.0
         version: 1.4.0(zod@4.5.1)
+
+  packages/router:
+    dependencies:
+      '@agent-router/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

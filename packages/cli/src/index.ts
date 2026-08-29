@@ -17,8 +17,8 @@ import { createInterface } from "node:readline";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createRegistry } from "@agent-router/adapters";
-import { listModels, adapterIdForModel, MODEL_CATALOG, TaskStore, TaskRouter } from "@agent-router/core";
+import { createAdapters } from "@agent-router/adapters";
+import { createRouter, listModels, adapterIdForModel, MODEL_CATALOG, type Task } from "@agent-router/router";
 import { renderEvent } from "./render.js";
 import { pick } from "./picker.js";
 import { MdStream } from "./md.js";
@@ -33,29 +33,21 @@ const C = {
   bold: (s: string) => `\x1b[1m${s}\x1b[0m`
 };
 
-const registry = createRegistry();
-const cwd = process.cwd();
-let permission: "ask" | "auto" = "auto";
-
 // —— State 层：任务持久化到 ~/.habor/state.jsonl（旧 ~/.myagent 数据自动迁移）——
 const stateDir = join(homedir(), ".habor");
 const stateFile = join(stateDir, "state.jsonl");
-if (!existsSync(stateDir)) {
-  const legacyDir = join(homedir(), ".myagent");
-  if (existsSync(legacyDir)) mkdirSync(stateDir, { recursive: true });
-  else mkdirSync(stateDir, { recursive: true });
-}
+if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
 if (!existsSync(stateFile)) {
   const legacy = join(homedir(), ".myagent", "state.jsonl");
   if (existsSync(legacy)) {
     try {
-      mkdirSync(stateDir, { recursive: true });
       writeFileSync(stateFile, readFileSync(legacy, "utf8"), "utf8");
     } catch { /* 迁移失败则忽略 */ }
   }
 }
 
-const tasks = new TaskStore();
+// —— 路由层：注入全部 adapters，组装 Registry + State + TaskRouter ——
+const { router, tasks } = createRouter(createAdapters(), { stateFile });
 if (existsSync(stateFile)) {
   try {
     tasks.loadFromJSON(readFileSync(stateFile, "utf8"));
@@ -63,7 +55,8 @@ if (existsSync(stateFile)) {
     /* 损坏则忽略 */
   }
 }
-const router = new TaskRouter(registry, tasks, { stateFile });
+const cwd = process.cwd();
+let permission: "ask" | "auto" = "auto";
 
 let saveTimer: NodeJS.Timeout | null = null;
 function persist(force = false): void {
@@ -104,11 +97,7 @@ ${C.bold("habor")} — 原生 Agent 聚合平台
 `;
 
 async function listAvailable(): Promise<string[]> {
-  const out: string[] = [];
-  for (const m of listModels()) {
-    if (await registry.isModelAvailable(m)) out.push(m);
-  }
-  return out;
+  return router.listAvailableModels();
 }
 
 function harnessForModel(model: string): string {

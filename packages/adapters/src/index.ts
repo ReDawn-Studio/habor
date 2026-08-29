@@ -6,7 +6,7 @@
  *   2. 在这里 import + 加入数组
  *   3. 在 core/registry.ts 的 MODEL_CATALOG 里登记「用户可见模型 → adapterId」
  */
-import { Registry, type Adapter } from "@agent-router/core";
+import type { Adapter } from "@agent-router/core";
 import { createAcpAdapter, type AcpAgentSpec } from "./acp.js";
 import { ZcodeStreamAdapter } from "./zcode-stream.js";
 import { dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec } from "./specs-acp.js";
@@ -24,11 +24,14 @@ export { ZcodeStreamAdapter } from "./zcode-stream.js";
  */
 export const ALL_ACP_SPECS: AcpAgentSpec[] = [dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec];
 
-/** 构建带全部 adapter 的注册表。 */
-export function createRegistry(): Registry {
-  const registry = new Registry();
-  for (const spec of ALL_ACP_SPECS) registry.register(createAcpAdapter(spec));
-  registry.register(new ZcodeStreamAdapter());
-  return registry;
+/**
+ * 构建全部 adapter（注入给路由层）。
+ * 路由层不感知具体 harness，只通过 Adapter 接口使用。
+ */
+export function createAdapters(): Adapter[] {
+  const adapters: Adapter[] = [];
+  for (const spec of ALL_ACP_SPECS) adapters.push(createAcpAdapter(spec));
+  adapters.push(new ZcodeStreamAdapter());
+  return adapters;
 }
 

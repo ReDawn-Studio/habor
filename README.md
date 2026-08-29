@@ -49,10 +49,15 @@ Task #1024 ──► Claude Session xyz（任务还是同一个）
 
 ```
 packages/
-├── core/       # Agent Core：types / Registry（模型→harness）/ TaskStore（State 层）/ TaskRouter（亲和性路由）
-├── adapters/   # 传输层：通用子进程框架 + ACP client 框架 + 各家 spec
-└── cli/        # habor：终端客户端（模型选择器 / 任务 / 会话 / 事件流渲染）
+├── core/       # 契约层：Agent/Session/Event/Permission 统一类型
+├── router/     # ★ 路由层（独立子项目）：MODEL_CATALOG（模型→harness）/ Registry / TaskStore（State 层）/ TaskRouter（亲和性路由+任务简报）
+├── adapters/   # 传输层：ACP client 框架 + ZCode Protocol + 各家 spec（注入给路由层）
+├── cli/        # habor：终端客户端（模型选择器 / 任务 / 会话 / 流式 markdown 渲染）
+└── dsh-acp/    # DeepSeek Harness 的 ACP server（in-process 引导）
 ```
+
+依赖方向：`cli → router ← adapters`；`router → core`；`adapters → core`。
+路由层不感知具体 harness，只通过 `Adapter` 接口工作；接入新 agent = 写 spec + 在 `MODEL_CATALOG` 登记。
 
 ## 已接入的原生 harness（本机实测）
 

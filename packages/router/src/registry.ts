@@ -4,7 +4,7 @@
  * 核心产品决策：CLI/IDE 暴露给用户的是「模型」；选模型后由这里
  * 决定真正去跑哪个厂商的原生 agent（用户完全不感知）。
  */
-import type { Adapter, ModelEntry } from "./types.js";
+import type { Adapter, ModelEntry } from "@agent-router/core";
 
 /** 模型目录：每个用户可见模型绑定一个原生 harness。 */
 export const MODEL_CATALOG: ModelEntry[] = [

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@agent-router/core": "workspace:*",
-    "@agent-router/adapters": "workspace:*"
+    "@agent-router/adapters": "workspace:*",
+    "@agent-router/router": "workspace:*"
   }
 }
