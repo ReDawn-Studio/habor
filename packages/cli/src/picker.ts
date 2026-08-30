@@ -11,7 +11,6 @@
  * 实现：复用 readline 的 keypress 事件（raw 模式下由 readline 在 stdin 上
  * 派发），避免与 readline 的 line 模式双重消费 stdin。
  */
-import type { Interface } from "node:readline";
 
 export interface PickItem<T> {
   value: T;
@@ -28,8 +27,8 @@ export function pick<T>(opts: {
   title: string;
   items: PickItem<T>[];
   currentValue?: T;
-  /** readline 接口（raw 模式期间挂起 line 模式） */
-  rl: Interface;
+  /** 输入层暂停/恢复（raw 模式期间挂起 line 输入，避免双重消费） */
+  rl: { pause(): void; resume(): void };
 }): Promise<T | null> {
   const { title, items, rl } = opts;
   if (items.length === 0) return Promise.resolve(null);

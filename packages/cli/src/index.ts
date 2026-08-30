@@ -22,6 +22,7 @@ import { createRouter, listModels, adapterIdForModel, MODEL_CATALOG, type Task }
 import { renderEvent } from "./render.js";
 import { pick } from "./picker.js";
 import { MdStream } from "./md.js";
+import { startTtyInput, type TtyInput } from "./tty-input.js";
 
 const C = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -118,17 +119,8 @@ function resolveModelArg(arg: string, available: string[]): string | undefined {
   return undefined;
 }
 
-/** kimi-code 风格的可搜索模型选择器。 */
+/** kimi-code 风格的可搜索模型选择器（TTY 输入层调用时先 pause 自己）。 */
 async function selectModelInteractive(title: string): Promise<string | null> {
-  picking = true;
-  try {
-    return await selectModelInteractiveInner(title);
-  } finally {
-    picking = false;
-  }
-}
-
-async function selectModelInteractiveInner(title: string): Promise<string | null> {
   const available = await listAvailable();
   if (available.length === 0) {
     console.log(C.red("✗ 没有可用模型（本机 harness 未安装）"));
@@ -141,7 +133,8 @@ async function selectModelInteractiveInner(title: string): Promise<string | null
       return { value: m, label: m, hint: `${entry?.vendor ?? ""} · ${harnessForModel(m)}` };
     }),
     currentValue: currentTaskId ? router.getTask(currentTaskId)?.bindings.filter((b) => !b.endedAt).at(-1)?.model : undefined,
-    rl
+    // pick 内部会 pause/resume 这个输入层（raw 模式期间不双重消费）
+    rl: ttyInput ?? { pause() {}, resume() {} }
   });
 }
 
@@ -293,93 +286,166 @@ async function runPrompt(text: string): Promise<void> {
     return;
   }
   const md = new MdStream(); // 流式 markdown（Claude Code 风格）
+  const INDENT = "  "; // kimi MESSAGE_INDENT：续行缩进，对齐 bullet 后的内容
+  let inAssistant = false; // 消息段
+  let inThinking = false; // 思考段（与消息段互斥）
+  const endThinking = () => {
+    if (inThinking) {
+      process.stdout.write("\n");
+      inThinking = false;
+    }
+  };
+  const writeMd = (out: string) => {
+    if (!out) return;
+    const lines = out.split("\n");
+    process.stdout.write(lines[0]);
+    for (let i = 1; i < lines.length; i++) {
+      process.stdout.write("\n" + (lines[i] ? INDENT + lines[i] : ""));
+    }
+  };
+  const flushText = () => {
+    const rest = md.flush();
+    if (rest) writeMd(rest);
+  };
   try {
     for await (const ev of router.continueTask(currentTaskId, text)) {
       if (ev.type === "message") {
-        // 流式/整段文本都走行级 markdown 渲染
-        process.stdout.write(md.push(ev.delta ?? ev.text ?? ""));
+        endThinking();
+        if (!inAssistant) {
+          process.stdout.write(C.cyan("● ")); // kimi STATUS_BULLET
+          inAssistant = true;
+        }
+        writeMd(md.push(ev.delta ?? ev.text ?? ""));
       } else if (ev.type === "done") {
-        const rest = md.flush();
-        if (rest) process.stdout.write(rest + "\n");
+        endThinking();
+        flushText();
+        if (inAssistant) process.stdout.write("\n");
+        inAssistant = false;
         process.stdout.write("\n");
         persist();
       } else if (ev.type === "thinking") {
-        // 推理过程：暗色斜体流式
-        process.stdout.write(`\x1b[2;3m${ev.thinking ?? ""}\x1b[0m`);
-      } else {
-        // 工具调用/结果/usage/错误：先冲刷未完成的文本行
-        const rest = md.flush();
-        if (rest) {
-          process.stdout.write(rest + "\n");
-          md.push("\n");
+        // 思考段：灰色标签 + 斜体内容（只打一次前缀）
+        if (inAssistant) {
+          flushText();
+          process.stdout.write("\n");
+          inAssistant = false;
         }
+        if (!inThinking) {
+          process.stdout.write(C.gray("┈ 思考 ") + `\x1b[2;3m`);
+          inThinking = true;
+        }
+        process.stdout.write(ev.thinking ?? "");
+      } else {
+        // 工具/usage/错误：结束所有段，先冲刷文本
+        endThinking();
+        flushText();
+        if (inAssistant) process.stdout.write("\n");
+        inAssistant = false;
         const rendered = renderEvent(ev);
         if (rendered) console.log(rendered);
       }
     }
   } catch (err) {
+    endThinking();
     console.log(C.red(`✗ ${err instanceof Error ? err.message : String(err)}`));
   }
 }
 
-// —— readline：handler 必须在这里（任何 await 之前）同步注册 ——
-const rl = createInterface({ input: process.stdin, output: process.stdout });
-rl.setPrompt(`${C.cyan("❯")} `);
-
-const queue: string[] = [];
-let closed = false;
-let draining = false;
-let picking = false;
-
-const pump = async (): Promise<void> => {
-  if (draining) return;
-  draining = true;
+// —— 统一输入分发：一行命令或 prompt，返回是否继续 ——
+let quitRequested = false;
+async function dispatch(line: string): Promise<void> {
+  const trimmed = line.trim();
+  if (!trimmed) return;
   try {
-    while (queue.length > 0) {
-      const line = queue.shift()!;
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      let cont = true;
-      try {
-        if (trimmed.startsWith("/")) {
-          cont = await handleCommand(trimmed);
-        } else {
-          await runPrompt(trimmed);
-        }
-      } catch (err) {
-        console.log(C.red(`✗ 内部错误: ${err instanceof Error ? err.stack ?? err.message : String(err)}`));
-      }
+    if (trimmed.startsWith("/")) {
+      const cont = await handleCommand(trimmed);
       if (!cont) {
-        rl.close();
-        break; // 不能用 return：finally 后的退出检查会变死代码
+        quitRequested = true;
+        bye();
       }
+    } else {
+      await runPrompt(trimmed);
     }
-  } finally {
-    draining = false;
+  } catch (err) {
+    console.log(C.red(`✗ 内部错误: ${err instanceof Error ? err.stack ?? err.message : String(err)}`));
   }
-  if (closed && queue.length === 0) {
-    persist(true);
-    console.log("\nbye");
-    process.exit(0);
-  }
-};
+}
 
-rl.on("line", (line) => {
-  if (picking) return; // picker raw 模式期间 readline 会残留按键行，丢弃
-  queue.push(line);
-  void pump();
-  rl.prompt();
-});
-rl.on("close", () => {
-  closed = true;
-  if (queue.length === 0 && !draining) {
-    persist(true);
-    console.log("\nbye");
-    process.exit(0);
-  }
-});
+let byeOnce = false;
+function bye(): void {
+  if (byeOnce) return;
+  byeOnce = true;
+  persist(true);
+  console.log("\nbye");
+  process.exit(0);
+}
 
-// —— main：只做启动输出，不影响 readline 事件 ——
+// —— 输入层：TTY 用 kimi 风格自建输入（Tab 补全 + / 命令推断）；非 TTY 用 readline ——
+const COMMANDS = ["model", "models", "new", "status", "tasks", "permission", "help", "quit", "exit"];
+function completeLine(line: string): string[] {
+  if (line.startsWith("/model ")) {
+    const q = line.slice(7).trim().toLowerCase();
+    return listModels()
+      .filter((m) => m.toLowerCase().includes(q))
+      .map((m) => `/model ${m}`);
+  }
+  if (line.startsWith("/")) {
+    const q = line.slice(1).toLowerCase();
+    return COMMANDS.filter((c) => c.startsWith(q)).map((c) => `/${c}`);
+  }
+  return [];
+}
+
+let ttyInput: TtyInput | null = null;
+
+function startInput(): void {
+  if (process.stdin.isTTY) {
+    ttyInput = startTtyInput({
+      prompt: `${C.cyan("❯")} `,
+      complete: completeLine,
+      onSubmit: async (line) => {
+        await dispatch(line);
+        ttyInput?.resume();
+      },
+      onEmptyLine: () => ttyInput?.resume(),
+      onCancel: () => {}
+    });
+  } else {
+    // 非 TTY（管道/脚本）：readline 逐行 + 串行队列（async handler 与 close 抢跑问题）
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    rl.setPrompt(`${C.cyan("❯")} `);
+    const queue: string[] = [];
+    let closed = false;
+    let draining = false;
+    const pump = async (): Promise<void> => {
+      if (draining) return;
+      draining = true;
+      try {
+        while (queue.length > 0) {
+          const line = queue.shift()!;
+          if (quitRequested) break;
+          await dispatch(line);
+        }
+      } finally {
+        draining = false;
+      }
+      if (closed && queue.length === 0 && !quitRequested) bye();
+    };
+    rl.on("line", (line) => {
+      if (quitRequested) return;
+      queue.push(line);
+      void pump();
+      rl.prompt();
+    });
+    rl.on("close", () => {
+      closed = true;
+      if (queue.length === 0 && !draining && !quitRequested) bye();
+    });
+    rl.prompt();
+  }
+}
+
+// —— main：只做启动输出 ——
 async function main(): Promise<void> {
   console.log(C.bold("\nhabor — 原生 Agent 聚合平台"));
   console.log(C.gray("用户只选模型；任务自动跑在对应厂商的原生 agent 里。"));
@@ -390,16 +456,18 @@ async function main(): Promise<void> {
   if (recent.length > 0) {
     console.log(C.gray(`最近任务: ${recent[0].id}（${recent[0].title}，对话 ${recent[0].conversation.length} 轮）`));
   }
-  console.log(C.gray(`输入 /help 查看命令。\n`));
-  if (process.stdin.isTTY && !currentTaskId) {
-    // kimi-code 式：启动即选模型，用户无需手输
+  console.log(C.gray(`输入 /help 查看命令；输入 / 或 Tab 可补全。\n`));
+  if (process.stdin.isTTY && !currentTaskId && !process.env.HABOR_NO_AUTOPICK) {
+    ttyInput?.pause();
     const picked = await selectModelInteractive("选择模型（↑/↓ 导航 · 直接输入过滤）");
+    ttyInput?.resume();
     if (picked) await selectModel(picked);
   }
-  rl.prompt();
 }
 
 main().catch((err) => {
   console.error(err);
   process.exit(1);
 });
+
+startInput();
