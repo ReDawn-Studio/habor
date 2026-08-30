@@ -447,7 +447,7 @@ function startInput(): void {
 
 // —— main：只做启动输出 ——
 async function main(): Promise<void> {
-  console.log(C.bold("\nhabor — 原生 Agent 聚合平台"));
+  console.log(C.bold("\nhabor — 原生 Agent 聚合平台") + C.gray(` v${"0.2.0"}`));
   console.log(C.gray("用户只选模型；任务自动跑在对应厂商的原生 agent 里。"));
   console.log(C.gray("State 层：任务/会话绑定/对话/快照统一管理，跨 harness 切换不丢上下文。\n"));
   const available = await listAvailable();
