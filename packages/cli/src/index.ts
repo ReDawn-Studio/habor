@@ -456,13 +456,11 @@ async function main(): Promise<void> {
   if (recent.length > 0) {
     console.log(C.gray(`最近任务: ${recent[0].id}（${recent[0].title}，对话 ${recent[0].conversation.length} 轮）`));
   }
-  console.log(C.gray(`输入 /help 查看命令；输入 / 或 Tab 可补全。\n`));
-  if (process.stdin.isTTY && !currentTaskId && !process.env.HABOR_NO_AUTOPICK) {
-    ttyInput?.pause();
-    const picked = await selectModelInteractive("选择模型（↑/↓ 导航 · 直接输入过滤）");
-    ttyInput?.resume();
-    if (picked) await selectModel(picked);
+  console.log(C.gray(`输入 / 或 Tab 可补全 · /help 查看全部命令`));
+  if (!currentTaskId) {
+    console.log(C.yellow(`提示: 输入 /model 并按 Tab 选择模型（如 /model gl → GLM-5.3）开始任务`));
   }
+  console.log();
 }
 
 main().catch((err) => {
