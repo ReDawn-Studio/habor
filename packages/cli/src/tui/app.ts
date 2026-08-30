@@ -339,8 +339,12 @@ export class AppView {
     let total = 0;
     for (const { lines } of allLines) total += lines.length + 1;
     const maxScroll = Math.max(0, total - transcriptH);
-    this.scroll = Math.min(this.scroll, maxScroll);
-    if (this.atBottom) this.scroll = 0;
+    if (this.atBottom) {
+      // 跟随底部：让最新消息贴住视口底部
+      this.scroll = maxScroll;
+    } else {
+      this.scroll = Math.min(Math.max(0, this.scroll), maxScroll);
+    }
 
     let y = transcriptTop - this.scroll;
     const drawLine = (lineSegs: { text: string; style: any }[], yy: number, prefix?: { text: string; style: any } | undefined) => {

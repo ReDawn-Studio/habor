@@ -135,6 +135,15 @@ class ZcodeSession implements Session {
           // 必须应答，否则 session/create 15s 超时；sessionId 在这里给出
           if (params?.sessionId) this.sessionId = params.sessionId;
           rpc.respond(id, { nativeSearchEnhancementsEnabled: false });
+        } else if (method === "interaction/requestPermission") {
+          // 工具权限请求：auto 模式自动允许
+          rpc.respond(id, { decision: "allow" });
+        } else if (method === "interaction/requestUserInput") {
+          // 需要用户输入的问题：auto 模式给空/自动
+          rpc.respond(id, { input: "", skip: true });
+        } else {
+          // 未知交互请求：尽力应答空对象，避免卡住
+          rpc.respond(id, {});
         }
       };
 
@@ -160,6 +169,14 @@ class ZcodeSession implements Session {
             sessionId: this.sessionId,
             deliveryKind: "web-remote-replayable"
           });
+          // yolo = 自动批准工具（auto 权限）；ask 模式用 build（需处理 requestPermission）
+          try {
+            const modeRes = await rpc.request("session/setMode", {
+              sessionId: this.sessionId,
+              mode: this.permission === "ask" ? "build" : "yolo"
+            });
+          } catch (e) {
+          }
           resolve();
         } catch (err) {
           reject(err);
@@ -204,12 +221,37 @@ class ZcodeSession implements Session {
           q.push({ type: "thinking", thinking: p.delta });
         } else if (kind === "text_end" || kind === "reasoning_end") {
           /* 结束标记，忽略 */
-        } else if (kind === "tool_call") {
+        } else if (kind === "tool_call" || kind === "tool_call_started" || kind === "tool_started") {
           q.push({
             type: "tool_call",
             tool: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", input: p.input ?? p.arguments ?? {} }
           });
-        } else if (kind === "complete" || p.stopReason !== undefined) {
+        } else if (kind === "result") {
+          // 工具执行结果（真正的完成事件，带 toolCallId + result）
+          const res = p.result ?? {};
+          const out = typeof res === "string" ? res
+            : res.content !== undefined ? (typeof res.content === "string" ? res.content : JSON.stringify(res.content))
+            : JSON.stringify(res).slice(0, 2000);
+          q.push({
+            type: "tool_result",
+            toolResult: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", output: out, isError: res.success === false || !!(res.error || p.error) }
+          });
+        } else if (kind === "tool_result" || kind === "tool_completed" || kind === "tool_call_result") {
+          // 工具完成（另一种形态）
+          const out = typeof p.result === "string" ? p.result
+            : p.output !== undefined ? String(p.output)
+            : p.content !== undefined ? (typeof p.content === "string" ? p.content : JSON.stringify(p.content))
+            : JSON.stringify(p).slice(0, 2000);
+          q.push({
+            type: "tool_result",
+            toolResult: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", output: out, isError: !!(p.error || p.isError) }
+          });
+        } else if (kind === "tool_execution_failed" || kind === "tool_timeout" || kind === "tool_error") {
+          q.push({
+            type: "tool_result",
+            toolResult: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", output: p.error ?? p.message ?? kind, isError: true }
+          });
+        } else if (kind === "complete" || (p.stopReason !== undefined && p.stopReason !== "tool-calls")) {
           // complete 事件没有 kind 字段：payload {content, stopReason, usage}
           const text = typeof p.content === "string" ? p.content : "";
           if (text && !streamedText) q.push({ type: "message", text });

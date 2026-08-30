@@ -87,6 +87,11 @@ let byeOnce = false;
 function bye(): void {
   if (byeOnce) return;
   byeOnce = true;
+  if (process.env.HABOR_DEBUG_BLOCKS && tui) {
+    try {
+      writeFileSync("/tmp/habor-blocks.json", JSON.stringify(tui.view.blocks.map(b=>({kind:b.kind, text:b.text.slice(0,200), meta:b.meta})), null, 1));
+    } catch { /* ignore */ }
+  }
   persist(true);
   tui?.stop();
   console.log("\nbye");
@@ -299,11 +304,11 @@ async function runPrompt(text: string): Promise<void> {
         } else if (ev.type === "tool_call") {
           tui.append({ kind: "tool", text: "", meta: { name: ev.tool?.name, status: "running" } });
         } else if (ev.type === "tool_result") {
-          // 更新最后一个 tool 块
-          const last = tui.view.blocks[tui.view.blocks.length - 1];
-          if (last?.kind === "tool") {
-            last.text = (ev.toolResult?.output ?? "").slice(0, 400);
-            last.meta = { ...last.meta, status: "done" };
+          // 更新最后一个 tool 块（找到 blocks 中最后一个未完成的 tool）
+          const lastTool = [...tui.view.blocks].reverse().find((b) => b.kind === "tool" && b.meta?.status !== "done");
+          if (lastTool) {
+            lastTool.text = (ev.toolResult?.output ?? "").slice(0, 400);
+            lastTool.meta = { ...lastTool.meta, status: "done" };
             tui.view.paint();
           }
         } else if (ev.type === "usage") {
