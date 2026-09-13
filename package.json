@@ -7,6 +7,9 @@
   "packageManager": "pnpm@11.22.0",
   "scripts": {
     "build": "pnpm -r build",
+    "test": "pnpm build && node --test packages/cli/test/*.test.mjs packages/router/test/*.test.mjs",
+    "test:native": "pnpm build && node packages/cli/test/native-provider-http.mjs",
+    "test:dsh-local": "pnpm build && node packages/cli/test/dsh-local-diagnostics.mjs",
     "dev": "pnpm -r --parallel dev",
     "cli": "pnpm --filter @agent-router/cli start",
     "habor": "pnpm --filter @agent-router/cli start"
