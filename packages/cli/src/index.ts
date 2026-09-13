@@ -6,7 +6,7 @@
  *   - 用户只看到「模型」，agent/harness 是内部实现。
  *   - 任务（Task）是跨 harness 切换保持不变的持久单位。
  *
- * 界面：TTY 下为全屏 TUI（opencode/kimi 风格，DeepSeek 蓝白主题）；
+ * 界面：TTY 下为全屏 TUI（对话区、可编辑草稿、命令菜单）；
  * 非 TTY（管道/脚本）下为日志式输出 + readline 输入。
  *
  * 分层：CLI → TaskRouter（Orchestrator+Router）→ Adapters（ACP/ZCode）
@@ -16,11 +16,17 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAdapters } from "@agent-router/adapters";
-import { createRouter, listModels, adapterIdForModel, MODEL_CATALOG } from "@agent-router/router";
-import { pick } from "./picker.js";
+import { createRouter } from "@agent-router/router";
 import { MdStream } from "./md.js";
 import { renderEvent } from "./render.js";
-import { TuiController, type Block } from "./tui/index.js";
+import { TuiController } from "./tui/index.js";
+import { TurnEvents } from "./tui/events.js";
+import { ProviderStore } from "./providers.js";
+import { AGENT_ADAPTERS, AGENT_NAMES, reasoningLabel, configuredReasoning, type ReasoningCapabilities, type AgentKind, type ProviderProfile } from "@agent-router/core";
+import { ReasoningPreferences } from "./reasoning-preferences.js";
+
+const VERSION = "0.4.1";
+if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
   dim: (s: string) => `\x1b[2m${s}\x1b[0m`,
@@ -33,7 +39,7 @@ const C = {
 };
 
 // —— State 层：任务持久化到 ~/.habor/state.jsonl ——
-const stateDir = join(homedir(), ".habor");
+const stateDir = process.env.HABOR_STATE_DIR ?? join(homedir(), ".habor");
 const stateFile = join(stateDir, "state.jsonl");
 if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true });
 if (!existsSync(stateFile)) {
@@ -45,7 +51,10 @@ if (!existsSync(stateFile)) {
   }
 }
 
-const { router, tasks } = createRouter(createAdapters(), { stateFile });
+const providers = new ProviderStore(stateDir);
+const reasoningPreferences = new ReasoningPreferences(stateDir);
+const { router, tasks, registry } = createRouter(createAdapters(), { stateFile });
+registry.configure(providers.entries(), entry => providers.connection(entry));
 if (existsSync(stateFile)) {
   try {
     tasks.loadFromJSON(readFileSync(stateFile, "utf8"));
@@ -57,14 +66,14 @@ let currentTaskId: string | null = null;
 let quitRequested = false;
 
 // —— 界面层（TTY = 全屏 TUI；非 TTY = 日志输出）——
-const isTty = !!process.stdin.isTTY;
+const isTty = !!process.stdin.isTTY && !!process.stdout.isTTY && process.env.TERM !== "dumb";
+let cancelRequested = false;
 let tui: TuiController | null = null;
 
 /** 命令/系统输出（TUI → 消息块；非 TUI → console.log） */
 function out(text: string): void {
   if (tui) {
-    tui.view.blocks.push({ kind: "system", text: stripAnsiForBlock(text) });
-    tui.view.paint();
+    tui.append({ kind: "system", text: stripAnsiForBlock(text) });
   } else {
     console.log(text);
   }
@@ -84,7 +93,7 @@ function persist(force = false): void {
 }
 
 let byeOnce = false;
-function bye(): void {
+async function bye(): Promise<void> {
   if (byeOnce) return;
   byeOnce = true;
   if (process.env.HABOR_DEBUG_BLOCKS && tui) {
@@ -94,6 +103,7 @@ function bye(): void {
   }
   persist(true);
   tui?.stop();
+  await router.close();
   console.log("\nbye");
   process.exit(0);
 }
@@ -102,26 +112,108 @@ const HELP = `habor — 原生 Agent 聚合平台
 用户只选模型；任务自动跑在对应厂商的原生 agent（harness）里。
 
 命令:
-  /model <名字>         选择模型（新任务 或 切换当前任务的执行 harness）；Tab 可补全
-  /models               列出可用模型
+  /model                打开模型选择面板，↑↓ 选择、Enter 确认
+  /models               打开模型选择面板（管道模式列出模型）
+  /providers            本地客户端 / 官方 API / 自定义提供商配置
+  /effort [档位]        当前模型的思考强度；无参数时打开选择器
   /tasks                列出任务（绑定链）
   /new                  结束当前任务，开始新任务
   /status               当前任务 + 会话绑定
   /permission <ask|auto> 权限模式
+  /clear                清空屏幕（保留任务和对话）
   /help                 帮助
   /quit                 退出
 直接输入 = 「继续当前任务」（同一任务永远留在原 session 上执行）。
-输入 / 或 Tab 可补全命令与模型。`;
+输入 / 打开命令菜单，↑↓ 选择，Tab 补全，Enter 确认。
+
+快捷键（交互终端）：
+  F2                    选择或切换模型（保留当前草稿）
+  F3                    添加或编辑 API 来源（Key 输入隐藏）
+  F4                    当前模型的思考强度；按模型与来源分别保存
+  ←→ / Home / End       移动输入光标
+  Alt+Enter / Ctrl+J     换行（支持的终端也可用 Shift+Enter）
+  ↑↓                    历史输入 / 多行移动
+  PgUp / PgDn / 滚轮     浏览对话；Esc 回到底部
+  Ctrl+O                展开或折叠思考与工具输出
+  Ctrl+Y                复制最近一段回复
+  Ctrl+L                清空屏幕
+  Esc / Ctrl+C          停止当前回复，保留会话界面
+  Ctrl+C                清空草稿；空草稿下连按两次退出
+运行时可以继续编辑草稿，结束后按 Enter 发送。
+鼠标选择文字可按住 Shift（取决于终端设置）。`;
 
 // —— 模型选择 ——
 
+let availableModels: string[] | null = null;
+let cachedReasoning: { model: string; capabilities: ReasoningCapabilities } | undefined;
 async function listAvailable(): Promise<string[]> {
-  return router.listAvailableModels();
+  return availableModels ?? router.listAvailableModels();
 }
 
 function harnessForModel(model: string): string {
-  const id = adapterIdForModel(model);
+  const id = registry.entry(model)?.adapterId;
   return id ? id : "?";
+}
+
+async function refreshConnections(): Promise<void> {
+  cachedReasoning = undefined;
+  registry.configure(providers.entries(), entry => providers.connection(entry));
+  availableModels = await router.listAvailableModels();
+  if (tui) {
+    tui.view.providers = providers.list();
+    tui.view.reasoningByModel = Object.fromEntries(registry.listModels().map(entry => [entry.model, reasoningPreferences.get(entry)]));
+    tui.view.modelInfo = Object.fromEntries(registry.listModels().map(entry => {
+      const agent = (Object.keys(AGENT_ADAPTERS) as AgentKind[]).find(kind => AGENT_ADAPTERS[kind] === entry.adapterId);
+      return [entry.model, { source: entry.sourceKind ?? "local", agent: agent ? AGENT_NAMES[agent] : entry.adapterId, modelId: entry.modelId ?? entry.model }];
+    }));
+    tui.view.setModels(availableModels);
+  }
+}
+
+async function currentReasoning(): Promise<ReasoningCapabilities> {
+  if (!currentTaskId) throw new Error("请先按 F2 选择模型");
+  const model = router.status(currentTaskId).target?.model;
+  if (!model) throw new Error("当前任务没有模型");
+  if (cachedReasoning?.model === model) return cachedReasoning.capabilities;
+  const capabilities = await router.reasoningCapabilities(currentTaskId);
+  cachedReasoning = { model, capabilities };
+  return capabilities;
+}
+
+async function setCurrentEffort(effort: string | undefined): Promise<void> {
+  if (!currentTaskId) throw new Error("请先选择模型");
+  const model = router.status(currentTaskId).target?.model;
+  if (!model) throw new Error("当前任务没有模型");
+  const previous = router.getReasoningEffort(currentTaskId);
+  await router.setReasoningEffort(currentTaskId, effort);
+  try { reasoningPreferences.set(registry.entry(model)!, effort); }
+  catch (error) { await router.setReasoningEffort(currentTaskId, previous); throw error; }
+  if (tui) { tui.view.reasoningEffort = effort; tui.view.reasoningByModel[model] = effort; }
+  out(`✓ ${model} · 思考强度：${reasoningLabel(effort)}${effort ? ` (${effort})` : ""} · 下一条消息生效`);
+  persist();
+}
+
+async function saveProvider(profile: ProviderProfile, key?: string, useModelId?: string): Promise<void> {
+  if (useModelId && !profile.models.some(model => model.id === useModelId)) throw new Error("请选择此来源中的模型");
+  const oldEntry = currentTaskId ? registry.entry(router.status(currentTaskId).target?.model ?? "") : undefined;
+  providers.save(profile, key);
+  await refreshConnections();
+  const next = registry.listModels().find(entry => entry.providerId === profile.id && entry.modelId === (useModelId ?? oldEntry?.modelId));
+  // Updating a Key or URL invalidates the already running native process, even when the model label is unchanged.
+  if (currentTaskId && oldEntry?.providerId === profile.id) {
+    await router.refreshSession(currentTaskId);
+  }
+  out(`✓ 已保存 ${profile.name} · API Key 独立保存`);
+  if (useModelId || oldEntry?.providerId === profile.id) {
+    if (next) {
+      try { await selectModel(next.model); }
+      catch (error) { throw new Error(`配置已保存，连接未切换：${error instanceof Error ? error.message : String(error)}`); }
+    } else {
+      // A removed model has no valid route; retain the task so choosing another source can carry over its context.
+      tui?.setModel(null);
+      out("当前模型已从此来源移除，请按 F2 选择新模型；任务记录已保留。");
+    }
+  } else out(`当前连接：${oldEntry?.model ?? "尚未选择"} · 按 F2 切换`);
 }
 
 function resolveModelArg(arg: string, available: string[]): string | undefined {
@@ -139,24 +231,23 @@ function resolveModelArg(arg: string, available: string[]): string | undefined {
 async function selectModel(model: string): Promise<void> {
   const available = await listAvailable();
   if (!available.includes(model)) {
-    out(C.red(`✗ 模型不可用: ${model}`));
-    out(C.gray(`  当前可用: ${available.join(", ") || "（无）"}`));
-    return;
+    throw new Error(`模型不可用：${model}，请先安装对应的原生客户端`);
   }
-  const entry = MODEL_CATALOG.find((m) => m.model === model);
+  const effort = reasoningPreferences.get(registry.entry(model)!);
   if (!currentTaskId) {
-    const task = await router.newTask({ model, cwd, permission });
+    const task = await router.newTask({ model, cwd, permission, reasoningEffort: effort });
     currentTaskId = task.id;
     tui?.setTask(task.id);
     tui?.setModel(model);
-    out(C.green(`✓ 新任务 ${task.id} · 已连接: ${model}`) + C.gray(` → ${harnessForModel(model)}（${entry?.display ?? ""}）`));
+    out(C.green(`✓ 已选择 ${model}，可以开始对话了。`));
   } else {
-    const before = router.getTask(currentTaskId);
-    const oldTarget = before ? before.bindings.filter((b) => !b.endedAt).at(-1) : undefined;
-    await router.switchTaskModel(currentTaskId, model, { permission });
+    await router.switchTaskModel(currentTaskId, model, { permission, reasoningEffort: effort });
     tui?.setModel(model);
-    out(C.yellow(`⇄ 切换到: ${model}`) + C.gray(`（原 ${oldTarget?.model ?? ""} 会话已关闭，上下文快照已保存）`));
+    out(C.green(`✓ 已切换到 ${model} · 当前任务的上下文已保留`));
   }
+  cachedReasoning = undefined;
+  providers.rememberModel(registry.entry(model)!);
+  if (tui) { tui.view.reasoningEffort = effort; tui.view.paint(); }
   persist();
 }
 
@@ -164,16 +255,31 @@ async function handleCommand(line: string): Promise<boolean> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ");
   switch (cmd) {
+    case "/effort": {
+      if (!arg && tui) { void tui.view.openReasoning(); return true; }
+      const capabilities = await currentReasoning();
+      if (!arg) out(`思考强度：default（原生默认）${capabilities.levels.map(level => ` · ${level.id}（${level.label}）`).join("")}`);
+      else {
+        const value = ["default", "auto", "默认", "原生默认"].includes(arg.toLowerCase()) ? undefined : capabilities.levels.find(level => level.id === arg.toLowerCase() || level.label === arg)?.id ?? arg;
+        await setCurrentEffort(value);
+      }
+      return true;
+    }
+    case "/providers":
+      if (tui) tui.view.openProviders();
+      else out("请在交互终端运行 habor，按 F3 配置提供商；不要将 API Key 写入命令行。");
+      return true;
     case "/help":
       out(HELP);
       return true;
     case "/models": {
+      if (tui) { tui.view.openModels(); return true; }
       const available = await listAvailable();
       const sb: string[] = [];
       sb.push(C.bold("\n可用模型（背后自动对应原生 harness）:"));
-      for (const m of listModels()) {
+      for (const { model: m } of registry.listModels()) {
         const ok = available.includes(m);
-        const entry = MODEL_CATALOG.find((x) => x.model === m);
+        const entry = registry.entry(m);
         sb.push(`  ${ok ? "○" : C.dim("×")} ${C.bold(m)}${C.gray(` → ${harnessForModel(m)}`)}`);
         sb.push(C.gray(`      ${entry?.vendor} · ${entry?.display ?? ""}`));
       }
@@ -182,6 +288,7 @@ async function handleCommand(line: string): Promise<boolean> {
     }
     case "/model":
       if (!arg) {
+        if (tui) { tui.view.openModels(); return true; }
         const available = await listAvailable();
         const sb: string[] = [C.bold("\n可用模型:")];
         available.forEach((m, i) => sb.push(`  ${i + 1}. ${m}`));
@@ -194,21 +301,21 @@ async function handleCommand(line: string): Promise<boolean> {
         else out(C.yellow(`「${arg}」未能唯一匹配。可用: ${available.join(", ")}`));
       }
       return true;
+    case "/clear":
+      if (tui) tui.view.clearMessages();
+      return true;
     case "/tasks": {
       const list = router.listTasks();
       if (list.length === 0) {
         out(C.yellow("（暂无任务，用 /model 开始一个）"));
         return true;
       }
-      const sb: string[] = [C.bold("\n任务（State 层：Task / 绑定链 / 对话轮数）:")];
-      for (const t of list) {
+      const sb: string[] = [C.bold(`最近任务（共 ${list.length} 个）:`)];
+      for (const t of list.slice(0, 8)) {
         const mark = t.id === currentTaskId ? C.green("●") : "○";
-        const active = t.bindings.filter((b) => !b.endedAt).at(-1);
         sb.push(`  ${mark} ${C.bold(t.id)}  ${t.title}${t.id === currentTaskId ? C.green("  ← 当前") : ""}`);
-        sb.push(C.gray(`      对话 ${t.conversation.length} 轮 · 快照 ${t.contextSnapshots.length}`));
-        for (const b of t.bindings) {
-          sb.push(C.gray(`        ${b.model} @ ${b.adapterId} (${b.sessionId}) [${b.reason}]${b.endedAt ? " 已结束" : " 活跃"}`));
-        }
+        const active = t.bindings.at(-1);
+        sb.push(C.gray(`      ${active?.model ?? "未选择模型"} · ${t.conversation.length} 条消息 · ${t.status}`));
       }
       out(sb.join("\n"));
       return true;
@@ -223,6 +330,8 @@ async function handleCommand(line: string): Promise<boolean> {
         currentTaskId = null;
         tui?.setTask(null);
         tui?.setModel(null);
+        if (tui) tui.view.reasoningEffort = undefined;
+        cachedReasoning = undefined;
       }
       out(C.gray("新任务：用 /model 选择模型开始。"));
       persist();
@@ -236,15 +345,21 @@ async function handleCommand(line: string): Promise<boolean> {
       const { task, target } = router.status(currentTaskId);
       const sb: string[] = [C.bold(`任务: ${task.id}`) + C.gray(`  ${task.title}`)];
       sb.push(`  状态: ${task.status} · 对话 ${task.conversation.length} 轮`);
-      if (target) sb.push(`  当前绑定: ${C.bold(target.model)} → harness ${C.cyan(target.adapterId)} (session ${target.sessionId})`);
+      if (target) {
+        const entry = registry.entry(target.model);
+        sb.push(`  模型: ${target.model} · 模型 ID: ${entry?.modelId ?? target.model}`);
+        sb.push(`  来源: ${entry?.sourceKind === "local" ? "本地客户端登录和配置" : entry?.vendor ?? "未知"} → ${target.adapterId}`);
+      }
       sb.push(`  权限: ${permission}`);
+      sb.push(`  思考强度: ${reasoningLabel(router.getReasoningEffort(currentTaskId))}（仅此模型与来源）`);
       out(sb.join("\n"));
       return true;
     }
     case "/permission":
       if (arg === "ask" || arg === "auto") {
         permission = arg;
-        out(C.green(`✓ 权限模式: ${permission}`));
+        if (tui) tui.view.permission = permission;
+        out(C.green(`✓ 权限模式: ${permission}（用于后续新建或切换的会话）`));
       } else {
         out(C.yellow("用法: /permission ask|auto"));
       }
@@ -268,7 +383,7 @@ async function dispatch(line: string): Promise<void> {
       const cont = await handleCommand(trimmed);
       if (!cont) {
         quitRequested = true;
-        bye();
+        await bye();
       }
     } else {
       await runPrompt(trimmed);
@@ -281,59 +396,37 @@ async function dispatch(line: string): Promise<void> {
 // —— 事件流 → 界面（TTY: Block 追加；非 TTY: 流式 markdown） ——
 
 async function runPrompt(text: string): Promise<void> {
-  if (!currentTaskId) {
+  if (!currentTaskId || !registry.entry(router.status(currentTaskId).target?.model ?? "")) {
     out(C.yellow("先用 /model 选择一个模型开始任务。"));
+    tui?.view.setInput(text);
     return;
   }
   tui?.beginTurn();
 
   if (tui) {
-    // TUI 模式：user 块 + 事件转 Block
-    tui.view.blocks.push({ kind: "user", text });
-    let assistantBuf = "";
-    let thinkingBuf = "";
-    let toolStatus: "running" | "done" = "running";
+    cancelRequested = false;
+    tui.append({ kind: "user", text });
+    const events = new TurnEvents(tui.view);
     try {
       for await (const ev of router.continueTask(currentTaskId, text)) {
-        if (ev.type === "message") {
-          assistantBuf += ev.delta ?? ev.text ?? "";
-          tui.append({ kind: "assistant", text: assistantBuf, meta: { delta: ev.delta ?? ev.text ?? "" } });
-        } else if (ev.type === "thinking") {
-          thinkingBuf += ev.thinking ?? "";
-          tui.append({ kind: "thinking", text: thinkingBuf, meta: { delta: ev.thinking ?? "" } });
-        } else if (ev.type === "tool_call") {
-          tui.append({ kind: "tool", text: "", meta: { name: ev.tool?.name, status: "running" } });
-        } else if (ev.type === "tool_result") {
-          // 更新最后一个 tool 块（找到 blocks 中最后一个未完成的 tool）
-          const lastTool = [...tui.view.blocks].reverse().find((b) => b.kind === "tool" && b.meta?.status !== "done");
-          if (lastTool) {
-            lastTool.text = (ev.toolResult?.output ?? "").slice(0, 400);
-            lastTool.meta = { ...lastTool.meta, status: "done" };
-            tui.view.paint();
-          }
-        } else if (ev.type === "usage") {
-          const u = ev.usage;
-          const raw = (u?.raw ?? {}) as { used?: number; size?: number };
-          const parts = [
-            u?.inputTokens != null ? `in ${u.inputTokens}` : "",
-            u?.outputTokens != null ? `out ${u.outputTokens}` : "",
-            u?.cachedTokens != null ? `cached ${u.cachedTokens}` : ""
-          ].filter(Boolean);
-          const used = raw.used != null ? `used ${raw.used}/${raw.size}` : "";
-          tui.append({ kind: "usage", text: `usage: ${parts.join(" / ")}${parts.length && used ? " · " : ""}${used}` });
-        } else if (ev.type === "error") {
-          tui.view.blocks.push({ kind: "system", text: C.red(`✗ ${ev.error?.message ?? "错误"}`) });
-          tui.view.paint();
-        } else if (ev.type === "done") {
-          break;
-        }
+        if (cancelRequested) break;
+        events.accept(ev);
+        if (ev.type === "done") break;
       }
     } catch (err) {
-      tui.view.blocks.push({ kind: "system", text: C.red(`✗ ${err instanceof Error ? err.message : String(err)}`) });
-      tui.view.paint();
+      if (!cancelRequested) {
+        events.failed = true;
+        tui.append({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      }
+    } finally {
+      events.finish(cancelRequested);
+      tui.endTurn();
+      if (cancelRequested) {
+        tui.append({ kind: "system", text: "已停止回复。可以修改草稿后继续。" });
+        tui.setStatusText("已停止");
+      } else if (events.failed) tui.setStatusText("回复出错 · 可重试");
+      persist();
     }
-    tui.endTurn();
-    persist();
     return;
   }
 
@@ -402,13 +495,24 @@ async function runPrompt(text: string): Promise<void> {
 
 // —— Tab 补全 ——
 
-const COMMANDS = ["model", "models", "new", "status", "tasks", "permission", "help", "quit", "exit"];
+const COMMANDS = ["model", "models", "providers", "effort", "new", "status", "tasks", "permission", "clear", "help", "quit", "exit"];
 function completeLine(line: string): string[] {
+  if (line.startsWith("/effort ")) {
+    const model = currentTaskId ? router.status(currentTaskId).target?.model : undefined;
+    const entry = model ? registry.entry(model) : undefined;
+    const capabilities = cachedReasoning?.model === model ? cachedReasoning?.capabilities : entry ? configuredReasoning({ model: entry.model, modelId: entry.modelId, cwd, reasoningLevels: entry.reasoningLevels }, entry.adapterId) : undefined;
+    const q = line.slice(8).trim().toLowerCase();
+    return ["default", ...(capabilities?.levels.map(level => level.id) ?? [])].filter(value => value.startsWith(q)).map(value => `/effort ${value}`);
+  }
   if (line.startsWith("/model ")) {
     const q = line.slice(7).trim().toLowerCase();
-    return listModels()
+    return (availableModels ?? [])
       .filter((m) => m.toLowerCase().includes(q))
       .map((m) => `/model ${m}`);
+  }
+  if (line.startsWith("/permission ")) {
+    const q = line.slice(12).trim();
+    return ["ask", "auto"].filter(mode => mode.startsWith(q)).map(mode => `/permission ${mode}`);
   }
   if (line.startsWith("/")) {
     const q = line.slice(1).toLowerCase();
@@ -420,28 +524,42 @@ function completeLine(line: string): string[] {
 // —— 启动 ——
 
 async function main(): Promise<void> {
-  const available = await listAvailable();
-
   if (isTty) {
-    // 全屏 TUI
     tui = new TuiController({
-      version: "0.2.0",
-      onInput: (line) => void dispatch(line),
+      version: VERSION,
+      cwd,
+      onInput: dispatch,
       onComplete: completeLine,
-      onInterrupt: () => bye()
+      onSelectModel: selectModel,
+      onSaveProvider: saveProvider,
+      onGetReasoning: currentReasoning,
+      onSetReasoning: setCurrentEffort,
+      onInterrupt: () => {
+        if (!currentTaskId || cancelRequested) return;
+        cancelRequested = true;
+        tui?.setStatusText("正在停止");
+        void router.cancelTask(currentTaskId).catch(err => out(`停止失败：${String(err)}`));
+      },
+      onExit: bye
     });
     tui.start();
-    tui.view.blocks.push({ kind: "system", text: `◈ habor v0.2.0 — 原生 Agent 聚合平台` });
-    tui.view.blocks.push({ kind: "system", text: `可用模型: ${available.join(", ") || "（无）"} · 输入 / 或 Tab 补全` });
-    if (!currentTaskId) {
-      tui.view.blocks.push({ kind: "system", text: C.yellow(`提示: /model + Tab 选择模型（如 /model gl → GLM-5.3）`) });
+    process.once("exit", () => tui?.stop());
+    process.once("SIGTERM", bye);
+    process.once("SIGHUP", bye);
+    await refreshConnections();
+    const preferred = providers.preferredModel(registry.listModels().filter(entry => availableModels!.includes(entry.model)));
+    if (preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker) {
+      try { await selectModel(preferred.model); }
+      catch (error) { out(`恢复上次连接失败：${error instanceof Error ? error.message : String(error)} · 按 F2 重新选择`); }
     }
-    tui.view.paint();
+    if (availableModels!.length && !tui.view.input && !tui.view.blocks.length) tui.view.openModels();
+    if (!availableModels!.length) out("未检测到本地 Agent。安装 Codex / Claude Code / Kimi Code 等客户端后可复用登录，或按 F3 配置 API 来源。");
     return;
   }
+  const available = await listAvailable();
 
   // 非 TTY（管道/脚本）：日志输出 + readline
-  console.log(C.bold(`\nhabor — 原生 Agent 聚合平台 v0.2.0`));
+  console.log(C.bold(`\nhabor — 原生 Agent 聚合平台 v${VERSION}`));
   console.log(C.gray(`可用模型: ${available.join(", ") || "（无）"}`));
   console.log(C.gray(`输入 /help 查看命令。\n`));
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -477,6 +595,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  tui?.stop();
   console.error(err);
   process.exit(1);
 });

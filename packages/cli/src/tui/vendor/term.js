@@ -5,7 +5,7 @@
 // terminal (Windows Terminal, ConPTY, iTerm2, GNOME Terminal, ...).
 import { spawn } from 'node:child_process'
 import { EventEmitter } from 'node:events'
-import { runeWidth, truncateWidth, fitWidth } from './util.js'
+import { runeWidth, graphemes } from './util.js'
 
 // ---- ANSI helpers -------------------------------------------------------
 
@@ -113,11 +113,13 @@ export class Screen {
   text(x, y, str, style = null) {
     if (y < 0 || y >= this.rows) return x
     let cx = x
-    for (const ch of str) {
+    for (const ch of graphemes(str)) {
       if (cx >= this.cols) break
       const w = runeWidth(ch)
       if (w === 0) {
-        if (cx >= 0) this.set(cx, y, ch, style)
+        let previous = cx - 1
+        if (this.cells[y][previous]?.ch === '') previous--
+        if (previous >= 0) this.cells[y][previous].ch += ch
         continue
       }
       this.set(cx, y, ch, style)
@@ -171,6 +173,7 @@ const CTRL_NAMES = {
 // Decode one key event from a raw-mode byte buffer. Returns { key } or null
 // when more bytes are needed.
 export function decodeKey(input) {
+  if (!input.length) return null
   const first = input[0]
   if (first === 0x1b) {
     // A lone ESC is the escape key itself.
@@ -253,12 +256,18 @@ export function decodeKey(input) {
       }
     }
     if (s.startsWith('\x1b[<')) return null
+    if (/^\x1b\[[0-9;?]*$/.test(s) || s === '\x1bO') return null
+    const ss3 = /^\x1bO([ABCDHFPQRS])/.exec(s)
+    if (ss3) return { key: { name: { A: 'up', B: 'down', C: 'right', D: 'left', H: 'home', F: 'end', P: 'f1', Q: 'f2', R: 'f3', S: 'f4' }[ss3[1]] }, consumed: 3 }
     const m = /^\x1b\[([0-9;]*)([A-Za-z~])/.exec(s)
     if (m) {
       const param = m[1]
       const final = m[2]
       const consumed = m[0].length
       if (consumed > input.length) return null
+      const modifier = (Number(param.split(';')[1]) || 1) - 1
+      const nav = { A: 'up', B: 'down', C: 'right', D: 'left', H: 'home', F: 'end' }[final]
+      if (nav) return { key: { name: nav, shift: !!(modifier & 1), alt: !!(modifier & 2), ctrl: !!(modifier & 4) }, consumed }
       if (final === 'A') return { key: { name: 'up' }, consumed }
       if (final === 'B') return { key: { name: 'down' }, consumed }
       if (final === 'C') return { key: { name: 'right' }, consumed }
@@ -273,8 +282,9 @@ export function decodeKey(input) {
         if (code > 0 && modifier === 5) return { key: { name: String.fromCodePoint(code), ctrl: true }, consumed }
       }
       if (final === '~') {
-        const p = Number(param)
-        const map = { 2: 'insert', 3: 'delete', 5: 'pageup', 6: 'pagedown', 7: 'home', 8: 'end' }
+        if (param === '27;2;13' || param === '27;3;13') return { key: { name: 'enter', shift: true }, consumed }
+        const p = Number(param.split(';')[0])
+        const map = { 1: 'home', 2: 'insert', 3: 'delete', 4: 'end', 5: 'pageup', 6: 'pagedown', 7: 'home', 8: 'end' }
         if (map[p]) return { key: { name: map[p] }, consumed }
         if (p >= 11 && p <= 15) return { key: { name: 'f' + (p - 10) }, consumed }
         if (p === 17) return { key: { name: 'f6' }, consumed }
@@ -361,16 +371,18 @@ export class Terminal extends EventEmitter {
     }
     this.input.on('data', this._onData)
     this.output.on('resize', this._onResize)
-    // Alternate screen, hide cursor, enable click/motion/wheel tracking and
+    // Alternate screen, disable wrapping at the lower-right cell, enable wheel tracking and
     // bracketed paste so pasted payloads (including binary images) arrive as
     // one delimited event instead of scattered printable bytes.
-    this.write('\x1b[?1049h\x1b[?25l\x1b[?1003h\x1b[?1006h\x1b[?2004h\x1b[2J\x1b[H')
+    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[2J\x1b[H')
     this.raw = true
   }
 
   stop() {
     if (!this.started) return
     this.started = false
+    clearTimeout(this._escapeTimer)
+    this._buffer = Buffer.alloc(0)
     this.input.off('data', this._onData)
     this.output.off('resize', this._onResize)
     if (this.input.isTTY) {
@@ -378,7 +390,7 @@ export class Terminal extends EventEmitter {
       this.input.pause()
     }
     // Disable bracketed paste + mouse tracking, show cursor, reset.
-    this.write('\x1b[?2004l\x1b[?1006l\x1b[?1003l\x1b[?25h\x1b[0m\x1b[?1049l')
+    this.write('\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l')
     this.raw = false
   }
 
@@ -428,8 +440,16 @@ export class Terminal extends EventEmitter {
   }
 
   _handleData(chunk) {
+    clearTimeout(this._escapeTimer)
     this._buffer = Buffer.concat([this._buffer, chunk])
     while (this._buffer.length > 0) {
+      if (this._buffer.length === 1 && this._buffer[0] === 0x1b) {
+        this._escapeTimer = setTimeout(() => {
+          this._buffer = Buffer.alloc(0)
+          this.emit('key', { name: 'escape' })
+        }, 35)
+        break
+      }
       const decoded = decodeKey(this._buffer)
       if (!decoded || decoded.consumed === 0) break
       this._buffer = this._buffer.subarray(decoded.consumed)
@@ -440,6 +460,7 @@ export class Terminal extends EventEmitter {
   // Paint a Screen to the terminal, diffing against the previous frame.
   // Only rows that changed are rewritten.
   paint(screen) {
+    if (!this.started) return
     const out = []
     if (!this._prev || this._prev.rows !== screen.rows || this._prev.cols !== screen.cols) {
       this._prev = new Screen(screen.cols, screen.rows)
@@ -489,14 +510,13 @@ export class Terminal extends EventEmitter {
       if (lastStyle !== null) out.push(RESET)
     }
     this._prev.cells = screen.cells
-    if (out.length > 0) this.write(out.join(''))
     // Park the (hidden) terminal cursor at the input caret so the OS IME
     // anchors its composition window inside the composer instead of at the
     // bottom-left corner. Screen coords are 0-based; the CSI cursor address
     // is 1-based, so add one to each. Falls back to the bottom-left.
     const cursorY = (screen.cursorY ?? screen.rows - 1) + 1
     const cursorX = (screen.cursorX ?? 0) + 1
-    this.write('\x1b[' + cursorY + ';' + cursorX + 'H')
+    this.write('\x1b[?2026h\x1b[?25l' + out.join('') + '\x1b[' + cursorY + ';' + cursorX + 'H\x1b[?25h\x1b[?2026l')
   }
 }
 

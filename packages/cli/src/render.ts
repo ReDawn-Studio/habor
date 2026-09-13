@@ -16,6 +16,8 @@ const C = {
 /** 渲染一个事件（逐事件一行或多行）。返回要打印的文本。 */
 export function renderEvent(ev: AgentEvent): string {
   switch (ev.type) {
+    case "connection":
+      return ev.connection ? C.gray(`  实际连接: ${ev.connection.agent} · ${ev.connection.providerName}${ev.connection.endpointHost ? ` (${ev.connection.endpointHost})` : ""} · ${ev.connection.modelId}`) : "";
     case "message":
       return ev.text ?? "";
     case "thinking":

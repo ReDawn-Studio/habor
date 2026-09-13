@@ -6,15 +6,22 @@
  */
 import { Terminal } from "./vendor/term.js";
 import { AppView, type Block } from "./app.js";
+import type { ProviderProfile, ReasoningCapabilities } from "@agent-router/core";
 
 export interface TuiControllerOptions {
   version: string;
+  cwd?: string;
   /** 提交一行输入（命令或 prompt） */
-  onInput: (line: string) => void;
+  onInput: (line: string) => void | Promise<void>;
   /** Tab 补全 */
   onComplete?: (line: string) => string[];
+  onSelectModel?: (model: string) => void | Promise<void>;
+  onSaveProvider?: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void>;
+  onGetReasoning?: () => Promise<ReasoningCapabilities>;
+  onSetReasoning?: (effort: string | undefined) => Promise<void>;
   /** Ctrl-C / Esc */
   onInterrupt?: () => void;
+  onExit?: () => void;
 }
 
 export class TuiController {
@@ -28,9 +35,15 @@ export class TuiController {
     this.view = new AppView({
       terminal: this.term,
       version: opts.version,
+      cwd: opts.cwd,
       onInput: opts.onInput,
       onComplete: opts.onComplete,
-      onCancelInput: opts.onInterrupt
+      onSelectModel: opts.onSelectModel,
+      onSaveProvider: opts.onSaveProvider,
+      onGetReasoning: opts.onGetReasoning,
+      onSetReasoning: opts.onSetReasoning,
+      onCancelInput: opts.onInterrupt,
+      onExit: opts.onExit
     });
   }
 
@@ -44,6 +57,7 @@ export class TuiController {
     this.term.on("key", (key: any) => {
       this.view.handleKey(key);
     });
+    this.term.on("resize", () => this.view.paint());
     // 动画帧（spinner / 运行状态）
     this.timer = setInterval(() => this.view.tick(), 100);
     this.view.paint();
@@ -76,11 +90,11 @@ export class TuiController {
   /** 开始一次回复（清空运行态） */
   beginTurn(): void {
     this.view.setBusy(true);
-    this.view.setStatusText("working…");
+    this.view.setStatusText("正在思考");
   }
   endTurn(): void {
     this.view.setBusy(false);
-    this.view.setStatusText("idle");
+    this.view.setStatusText("");
   }
   /** 在输入框提示一条临时消息（模型连接成功等） */
   toast(text: string): void {

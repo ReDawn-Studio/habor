@@ -4,16 +4,23 @@
 // { text, style } segments. Not a full spec implementation: covers the block
 // shapes and inline spans most model output uses, and degrades gracefully.
 import { makeStyle, mergeStyle } from './term.js'
-import { runeWidth } from './util.js'
+import { runeWidth, graphemes, displayWidth } from './util.js'
 
 // Parse inline markdown into styled segments. `base` is merged into each.
 // Handles **bold**, *italic*, `code`, [text](url), and ~~strike~~.
 export function inlineSegments(text, theme, base = null) {
   const segments = []
   const buf = []
+  const inherited = (style) => base ? {
+    ...mergeStyle(base, style),
+    bold: base.bold || style.bold,
+    italic: base.italic || style.italic,
+    dim: base.dim || style.dim,
+    underline: base.underline || style.underline,
+  } : style
   const flush = (style) => {
     if (buf.length === 0) return
-    segments.push({ text: buf.join(''), style: base ? mergeStyle(base, style) : style })
+    segments.push({ text: buf.join(''), style: inherited(style) })
     buf.length = 0
   }
   const plain = () => flush(makeStyle({ fg: theme.text }))
@@ -34,7 +41,7 @@ export function inlineSegments(text, theme, base = null) {
       }
       if (closed) {
         flush(makeStyle({ fg: theme.markdownCode }))
-        segments.push({ text: code, style: makeStyle({ fg: theme.markdownCode, bg: theme.codeBg }) })
+        segments.push({ text: code, style: inherited(makeStyle({ fg: theme.markdownCode, bg: theme.codeBg })) })
         i = j + 1
         continue
       }
@@ -74,7 +81,7 @@ export function inlineSegments(text, theme, base = null) {
         if (urlEnd !== -1) {
           plain()
           const label = text.slice(i + 1, close)
-          segments.push({ text: label, style: makeStyle({ fg: theme.markdownLinkText, underline: true }) })
+          segments.push({ text: label, style: inherited(makeStyle({ fg: theme.markdownLinkText, underline: true })) })
           i = urlEnd + 1
           continue
         }
@@ -104,103 +111,26 @@ export function inlineSegments(text, theme, base = null) {
 export function wrapSegments(segments, width) {
   if (width <= 0) return [[]]
   const lines = []
-  let current = []
-  let currentW = 0
-  let word = []
-  let wordW = 0
-  const pushWord = () => {
-    if (wordW === 0) return
-    if (currentW + wordW > width && current.length > 0) {
-      lines.push(current)
-      current = []
-      currentW = 0
-    }
-    if (wordW > width) {
-      let rest = word
-      let restW = wordW
-      while (restW > width) {
-        let acc = 0
-        let used = 0
-        outer: for (const seg of rest) {
-          for (const ch of seg.text) {
-            const w = runeWidth(ch)
-            if (acc + w > width) break outer
-            acc += w
-            used += ch.length
-          }
-        }
-        const chunk = extractPrefixSegments(rest, used)
-        lines.push([...current, ...chunk])
-        current = []
-        currentW = 0
-        rest = consumePrefixSegments(rest, used)
-        restW = rest.reduce((s, seg) => s + segWidth(seg.text), 0)
-      }
-      for (const seg of rest) current.push(seg)
-      currentW = restW
-    } else {
-      for (const seg of word) current.push(seg)
-      currentW += wordW
-    }
-    word = []
-    wordW = 0
-  }
-  for (const seg of segments) {
-    const parts = seg.text.split(/(\s+)/)
-    for (const part of parts) {
-      if (part === '') continue
-      if (/^\s+$/.test(part)) {
-        pushWord()
-        if (currentW + runeWidth(part) <= width || current.length === 0) {
-          current.push({ text: part, style: seg.style })
-          currentW += runeWidth(part)
-        } else if (current.length > 0) {
-          lines.push(current)
-          current = []
-          currentW = 0
-        }
-      } else {
-        if (word.length > 0 && word[word.length - 1].style !== seg.style) pushWord()
-        word.push({ text: part, style: seg.style })
-        wordW += segWidth(part)
+  let row = [], cells = 0
+  const flush = () => { lines.push(row); row = []; cells = 0 }
+  for (const segment of segments) {
+    for (const word of segment.text.split(/(\s+)/)) {
+      if (!word) continue
+      const wordWidth = displayWidth(word)
+      if (!/^\s+$/.test(word) && wordWidth <= width && cells && cells + wordWidth > width) flush()
+      for (const glyph of graphemes(word)) {
+        const w = runeWidth(glyph)
+        if (cells && cells + w > width) flush()
+        const text = w > width ? '�' : glyph
+        const last = row.at(-1)
+        if (last?.style === segment.style) last.text += text
+        else row.push({ text, style: segment.style })
+        cells += Math.min(w, width)
       }
     }
   }
-  pushWord()
-  if (current.length > 0 || lines.length === 0) lines.push(current)
+  if (row.length || !lines.length) lines.push(row)
   return lines
-}
-
-function segWidth(text) {
-  let w = 0
-  for (const ch of text) w += runeWidth(ch)
-  return w
-}
-
-function extractPrefixSegments(segs, used) {
-  const out = []
-  let acc = 0
-  for (const seg of segs) {
-    if (acc >= used) break
-    const take = Math.min(used - acc, seg.text.length)
-    out.push({ text: seg.text.slice(0, take), style: seg.style })
-    acc += take
-  }
-  return out
-}
-function consumePrefixSegments(segs, used) {
-  const out = []
-  let acc = 0
-  for (const seg of segs) {
-    if (acc >= used) {
-      out.push(seg)
-      continue
-    }
-    const take = Math.min(used - acc, seg.text.length)
-    acc += take
-    if (take < seg.text.length) out.push({ text: seg.text.slice(take), style: seg.style })
-  }
-  return out
 }
 
 const CODE_BG = '1e1e1e'
@@ -222,7 +152,7 @@ export function renderMarkdown(text, theme, width) {
         i++
         continue
       }
-      const segs = [{ text: line, style: makeStyle({ fg: theme.markdownCodeBlock, bg: CODE_BG }) }]
+      const segs = [{ text: line, style: makeStyle({ fg: theme.markdownCodeBlock, bg: theme.codeBg ?? CODE_BG }) }]
       pushWrapped(lines, segs, width)
       i++
       continue
@@ -231,18 +161,18 @@ export function renderMarkdown(text, theme, width) {
     const fence = /^```(\S*)/.exec(trimmed)
     if (fence) {
       inCode = true
-      lines.push([])
+      pushWrapped(lines, [{ text: '┌ ' + (fence[1] || 'code'), style: makeStyle({ fg: theme.textMuted, bg: theme.codeBg }) }], width)
       i++
       continue
     }
     const h = /^(#{1,4})\s+(.*)$/.exec(trimmed)
     if (h) {
-      lines.push([{ text: h[2], style: makeStyle({ fg: theme.markdownHeading, bold: true }) }])
+      pushWrapped(lines, [{ text: h[2], style: makeStyle({ fg: theme.markdownHeading, bold: true }) }], width)
       i++
       continue
     }
     if (/^(---|\*\*\*|___)\s*$/.test(trimmed)) {
-      lines.push([{ text: '─'.repeat(Math.max(4, width)), style: makeStyle({ fg: theme.markdownHorizontalRule, dim: true }) }])
+      lines.push([{ text: '─'.repeat(Math.max(0, width)), style: makeStyle({ fg: theme.markdownHorizontalRule, dim: true }) }])
       i++
       continue
     }

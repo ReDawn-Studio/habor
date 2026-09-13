@@ -6,6 +6,9 @@ export class Screen {
   constructor(cols: number, rows: number);
   cols: number;
   rows: number;
+  cells: { ch: string; style: any }[][];
+  cursorX?: number;
+  cursorY?: number;
   resize(cols: number, rows: number): boolean;
   clear(style?: any): void;
   set(x: number, y: number, ch: string, style?: any): void;

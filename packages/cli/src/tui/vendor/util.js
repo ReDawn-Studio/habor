@@ -1,28 +1,35 @@
 // Vendored from dsh-oc-tui (https://github.com/rayafriandion/dsh-oc-tui), MIT License.
 // Copyright (c) 2026 rayafriandion. Adapted for habor.
 // Text and display helpers for the TUI. No dsh dependencies.
+import { toDisplayText } from '@agent-router/core'
 
 // Width of a rune in terminal cells: CJK/full-width runes are double width,
 // combining marks are zero width, everything else is one.
 const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{2FFFD}]/u
-const ZERO = /[\u0300-\u036F\u200B-\u200F\uFE00-\uFE0F]/u
+const ZERO = /^[\p{Mark}\u200B-\u200F\uFE00-\uFE0F]+$/u
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+export function graphemes(str) {
+  return Array.from(segmenter.segment(str), item => item.segment)
+}
 
 export function runeWidth(ch) {
+  if (!ch || ch === '\n' || ch === '\r') return 0
   if (ZERO.test(ch)) return 0
+  if (/\p{Emoji_Presentation}|\uFE0F/u.test(ch)) return 2
   if (WIDE.test(ch)) return 2
   return 1
 }
 
 export function displayWidth(str) {
   let w = 0
-  for (const ch of str) w += runeWidth(ch)
+  for (const ch of graphemes(str)) w += runeWidth(ch)
   return w
 }
 
 // ANSI escape sequence: CSI ... final byte in 0x40-0x7E.
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g
 export function stripAnsi(str) {
-  return str.replace(ANSI_RE, '')
+  return toDisplayText(str).replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(ANSI_RE, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 }
 
 // Truncate by display width, appending '…' when something was cut.
@@ -30,7 +37,7 @@ export function truncateWidth(str, width) {
   if (width <= 0) return ''
   let out = ''
   let w = 0
-  for (const ch of str) {
+  for (const ch of graphemes(str)) {
     const cw = runeWidth(ch)
     if (w + cw > width) {
       if (out.length > 0 && w < width) out += '…'
@@ -92,12 +99,13 @@ export function wrapText(str, width) {
           while (displayWidth(rest) > width) {
             let cut = 0
             let cw = 0
-            for (const ch of rest) {
+            for (const ch of graphemes(rest)) {
               const w = runeWidth(ch)
               if (cw + w > width) break
               cw += w
               cut += ch.length
             }
+            if (cut === 0) cut = graphemes(rest)[0].length
             lines.push(rest.slice(0, cut))
             rest = rest.slice(cut)
           }
