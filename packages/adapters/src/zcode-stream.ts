@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Adapter, AgentEvent, Session, SessionOptions } from "@agent-router/core";
+import { toDisplayText, assertReasoningLevel, reasoningLabel, type ReasoningCapabilities } from "@agent-router/core";
 
 const ZCODE_MODELS = ["GLM-5.3"];
 
@@ -33,6 +34,7 @@ const cliPath = resolveZcodeCli();
 class ZcodeRpc {
   private pending = new Map<string | number, (m: any) => void>();
   private seq = 1;
+  private closed = false;
   onNotification: (method: string, params: any) => void = () => {};
   onRequest: (id: string | number, method: string, params: any) => void = () => {};
 
@@ -51,6 +53,14 @@ class ZcodeRpc {
         this.handleLine(line);
       }
     });
+    const close = () => {
+      if (this.closed) return;
+      this.closed = true;
+      for (const pending of this.pending.values()) pending({ error: { message: "ZCode 连接已关闭，请重试" } });
+      this.pending.clear();
+    };
+    this.stdout.on("end", close);
+    this.stdin.on("error", close);
   }
 
   private handleLine(line: string): void {
@@ -76,16 +86,17 @@ class ZcodeRpc {
   }
 
   request(method: string, params: any): Promise<any> {
+    if (this.closed) return Promise.reject(new Error("ZCode 连接已关闭，请重试"));
     const id = this.seq++;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, (m) => (m.error ? reject(new Error(m.error.message ?? "zcode rpc error")) : resolve(m.result)));
-      this.stdin.write(JSON.stringify({ id, method, params }) + "\n");
-      setTimeout(() => {
+      const timer = setTimeout(() => {
         if (this.pending.has(id)) {
           this.pending.delete(id);
           reject(new Error(`zcode rpc timeout: ${method}`));
         }
       }, 60000);
+      this.pending.set(id, (m) => { clearTimeout(timer); m.error ? reject(new Error(toDisplayText(m.error))) : resolve(m.result); });
+      this.stdin.write(JSON.stringify({ id, method, params }) + "\n");
     });
   }
 
@@ -101,11 +112,14 @@ class ZcodeSession implements Session {
   private rpc: ZcodeRpc | null = null;
   private sessionId: string | null = null;
   private connected: Promise<void> | null = null;
+  private reasoning: ReasoningCapabilities = { levels: [], source: "unknown" };
+  private defaultThoughtLevel?: string;
 
   constructor(
     readonly model: string,
     readonly cwd: string,
-    readonly permission: "ask" | "auto"
+    readonly permission: "ask" | "auto",
+    private opts?: SessionOptions
   ) {}
 
   private async connect(): Promise<void> {
@@ -122,7 +136,7 @@ class ZcodeSession implements Session {
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       if (!cliPath) return reject(new Error("未找到 ZCode CLI（zcode.cjs）"));
-      const proc = spawn(process.execPath, [cliPath, "app-server"], { stdio: ["pipe", "pipe", "pipe"] });
+      const proc = spawn(process.execPath, [cliPath, "app-server"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...(this.opts?.connection ? { HABOR_PROVIDER_KEY: this.opts.connection.apiKey } : {}) } });
       this.proc = proc;
       proc.stderr.on("data", () => {
         /* 调试用：忽略 */
@@ -155,9 +169,11 @@ class ZcodeSession implements Session {
       void (async () => {
         try {
           const workspaceKey = `habor-${this.id}`;
-          const result = await rpc.request("session/create", {
-            workspace: { workspacePath: this.cwd, workspaceKey }
+          let result = await rpc.request("session/create", {
+            workspace: { workspacePath: this.cwd, workspaceKey },
+            ...(this.runtimeModel() ? { runtimeModel: this.runtimeModel(), titleGenerationEnabled: false } : {})
           });
+          this.sessionId ??= result?.snapshot?.session?.sessionId ?? result?.snapshot?.session?.id ?? result?.sessionId;
           // sessionId 由 requestRuntimePreferences 回调给出
           // 等 sessionId 就绪（create 过程中服务端会先发 requestRuntimePreferences）
           const deadline = Date.now() + 20000;
@@ -165,6 +181,18 @@ class ZcodeSession implements Session {
             await new Promise((r) => setTimeout(r, 50));
           }
           if (!this.sessionId) throw new Error("zcode: 未拿到 sessionId");
+          const desired = this.opts?.modelId ?? "glm-5.3";
+          const selection = result?.snapshot?.settings?.model ?? result?.settings?.model;
+          const runtimeModel = this.runtimeModel();
+          const ref = runtimeModel?.model ?? selection?.available?.find((item: any) => item.ref?.modelId?.toLowerCase() === desired.toLowerCase())?.ref;
+          if (runtimeModel || selection?.current?.modelId?.toLowerCase() !== desired.toLowerCase()) {
+            if (!ref) throw new Error(`ZCode 本地配置中没有 ${desired}，请在 /providers 添加 API 来源或在 ZCode 中配置该模型`);
+            result = await rpc.request("session/setModel", { sessionId: this.sessionId, model: ref, ...(runtimeModel ? { runtimeModel } : {}), persistAsWorkspaceLastUsed: false });
+          }
+          const thought = result?.snapshot?.settings?.thoughtLevel ?? result?.settings?.thoughtLevel;
+          this.defaultThoughtLevel = thought?.current ?? thought?.defaultLevel;
+          this.reasoning = { source: thought ? "native" : "unknown", defaultId: this.defaultThoughtLevel,
+            levels: (thought?.available ?? []).filter((level: any) => typeof level.value === "string" && (!this.opts?.reasoningLevels || this.opts.reasoningLevels.includes(level.value))).map((level: any) => ({ id: level.value, label: reasoningLabel(level.value), description: level.description })) };
           await rpc.request("session/subscribe", {
             sessionId: this.sessionId,
             deliveryKind: "web-remote-replayable"
@@ -185,6 +213,30 @@ class ZcodeSession implements Session {
     });
   }
 
+  private runtimeModel(): any {
+    const api = this.opts?.connection;
+    if (!api) return undefined;
+    const modelId = this.opts?.modelId ?? this.model;
+    return {
+      revision: `habor-${api.providerId}`, generatedAt: Date.now(), model: { providerId: api.providerId, modelId },
+      provider: { providerId: api.providerId, label: api.name, kind: api.protocol === "anthropic" ? "anthropic" : "openai-compatible",
+        apiFormat: api.protocol === "anthropic" ? "anthropic-messages" : api.protocol === "responses" ? "openai-responses" : "openai-chat-completions",
+        source: "ephemeral", baseURL: api.baseUrl, apiKey: { source: "env", name: "HABOR_PROVIDER_KEY" }, models: [{ modelId, supportsTools: true,
+          ...(this.opts?.reasoningLevels ? { reasoning: { enabled: true, levels: this.opts.reasoningLevels.map(value => ({ value, label: reasoningLabel(value) })) } } : {})
+        }]
+      }
+    };
+  }
+
+  async getReasoningCapabilities(): Promise<ReasoningCapabilities> { await this.connect(); return this.reasoning; }
+  private async applyReasoning(effort?: string): Promise<void> {
+    assertReasoningLevel(this.reasoning, effort);
+    await this.rpc!.request("session/setThoughtLevel", { sessionId: this.sessionId, thoughtLevel: effort ?? this.defaultThoughtLevel, persistAsWorkspaceLastUsed: false });
+  }
+  async setReasoningEffort(effort: string | undefined): Promise<void> {
+    await this.connect(); await this.applyReasoning(effort); if (this.opts) this.opts.reasoningEffort = effort;
+  }
+
   async *prompt(input: string): AsyncIterable<AgentEvent> {
     const base = { sessionId: this.id, adapterId: this.adapterId, model: this.model };
     const fail = (err: unknown) => ({
@@ -197,6 +249,7 @@ class ZcodeSession implements Session {
     let rpc: ZcodeRpc;
     try {
       await this.connect();
+      if (this.opts?.reasoningEffort !== undefined) await this.applyReasoning(this.opts.reasoningEffort);
       rpc = this.rpc!;
     } catch (err) {
       yield fail(err);
@@ -249,7 +302,7 @@ class ZcodeSession implements Session {
         } else if (kind === "tool_execution_failed" || kind === "tool_timeout" || kind === "tool_error") {
           q.push({
             type: "tool_result",
-            toolResult: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", output: p.error ?? p.message ?? kind, isError: true }
+            toolResult: { id: p.toolCallId ?? p.callId ?? "t", name: p.toolName ?? p.name ?? "tool", output: toDisplayText(p.error ?? p.message ?? kind), isError: true }
           });
         } else if (kind === "complete" || (p.stopReason !== undefined && p.stopReason !== "tool-calls")) {
           // complete 事件没有 kind 字段：payload {content, stopReason, usage}
@@ -269,7 +322,7 @@ class ZcodeSession implements Session {
           }
           done = true;
         } else if (kind === "error" || p.error) {
-          q.push({ type: "error", error: { message: p.message ?? p.error ?? "zcode error" } });
+          q.push({ type: "error", error: { message: toDisplayText(p.message ?? p.error ?? "zcode error") } });
           done = true;
         } else if (kind === "permission" || kind === "user_message" || kind === "state_updated") {
           /* 暂不处理 */
@@ -329,6 +382,6 @@ export class ZcodeStreamAdapter implements Adapter {
   }
 
   async createSession(opts: SessionOptions): Promise<Session> {
-    return new ZcodeSession(opts.model, opts.cwd, opts.permission ?? "auto");
+    return new ZcodeSession(opts.model, opts.cwd, opts.permission ?? "auto", opts);
   }
 }

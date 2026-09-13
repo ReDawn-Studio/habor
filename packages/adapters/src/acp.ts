@@ -28,6 +28,7 @@ import type {
   SessionOptions
 } from "@agent-router/core";
 import { runCli } from "./base.js";
+import { describeAgentError, reasoningLabel, assertReasoningLevel, type ReasoningCapabilities } from "@agent-router/core";
 
 /** 一个原生 harness 的 ACP 接入规格。 */
 export interface AcpAgentSpec {
@@ -35,7 +36,7 @@ export interface AcpAgentSpec {
   harnessName: string;
   models: string[];
   /** 启动该 harness 的 ACP server 子进程 */
-  command(ctx: { model: string }): { cmd: string; argv: string[]; env?: NodeJS.ProcessEnv };
+  command(ctx: { model: string; modelId?: string; connection?: SessionOptions["connection"]; reasoningEffort?: string }): { cmd: string; argv: string[]; env?: NodeJS.ProcessEnv };
   /** 本机可用性检查 */
   isAvailable?(): Promise<boolean>;
   /** 是否后台保活（false 时每次 prompt 新建进程；默认 true 保活多轮） */
@@ -64,6 +65,10 @@ class AcpSession implements Session {
   private proc: ChildProcess | null = null;
   private conn: Promise<boolean> | null = null;
   private active: acp.ActiveSession | null = null;
+  private client?: acp.ClientContext;
+  private configOptions: any[] = [];
+  private nativeReasoning?: ReasoningCapabilities;
+  private defaultEffortValue?: string;
   private closed = false;
   private released: (() => void) | null = null;
   private pendingPermission: {
@@ -103,8 +108,10 @@ class AcpSession implements Session {
 
   private connect(): Promise<boolean> {
     return new Promise<boolean>((resolveConnect, rejectConnect) => {
-      const { cmd, argv, env } = this.spec.command({ model: this.opts.model });
-      const proc = spawn(cmd, argv, { stdio: ["pipe", "pipe", "inherit"], env: { ...process.env, ...env } });
+      const { cmd, argv, env } = this.spec.command(this.opts);
+      const proc = spawn(cmd, argv, { cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
+      // Server diagnostics must not overwrite the terminal's managed screen.
+      proc.stderr?.resume();
       this.proc = proc;
       proc.on("error", (err) => rejectConnect(err));
 
@@ -141,6 +148,16 @@ class AcpSession implements Session {
           });
           const active = await ctx.buildSession(this.opts.cwd).start();
           this.active = active;
+          this.client = ctx;
+          this.configOptions = active.newSessionResponse.configOptions ?? [];
+          const modelOption = this.configOptions.find(option => option.category === "model");
+          if (!this.opts.connection && modelOption && modelOption.currentValue !== this.opts.modelId && modelOption.options?.some((option: any) => option.value === this.opts.modelId)) {
+            const updated = await ctx.request(acp.methods.agent.session.setConfigOption, { sessionId: active.sessionId, configId: modelOption.id, value: this.opts.modelId! }) as { configOptions: any[] };
+            this.configOptions = updated.configOptions;
+          }
+          const thought = this.thoughtOption();
+          this.defaultEffortValue = thought?.options?.some((option: any) => option.value === "default") ? "default" : thought?.currentValue;
+          this.nativeReasoning = active.newSessionResponse._meta?.haborReasoning as ReasoningCapabilities | undefined;
           resolveConnect(true);
           await releasedPromise; // 保活：直到 close()
         })
@@ -149,6 +166,30 @@ class AcpSession implements Session {
           rejectConnect(err instanceof Error ? err : new Error(String(err)));
         });
     });
+  }
+
+  private thoughtOption(): any { return this.configOptions.find(option => option.category === "thought_level"); }
+  private reasoningCapabilities(): ReasoningCapabilities {
+    const option = this.thoughtOption();
+    const flatten = (options: any[]): any[] => options.flatMap(item => Array.isArray(item.options) ? flatten(item.options) : [item]);
+    const capabilities: ReasoningCapabilities = this.nativeReasoning ?? { source: option ? "native" : "unknown", defaultId: this.defaultEffortValue,
+      levels: flatten(option?.options ?? []).filter(item => typeof item.value === "string" && item.value !== "default" && item.value !== "auto").map(item => ({ id: item.value, label: reasoningLabel(item.value), description: item.description })) };
+    return this.opts.reasoningLevels ? { ...capabilities, source: "configured", levels: capabilities.levels.filter(level => this.opts.reasoningLevels!.includes(level.id)) } : capabilities;
+  }
+  async getReasoningCapabilities(): Promise<ReasoningCapabilities> { await this.ensureConnected(); return this.reasoningCapabilities(); }
+  private async applyReasoning(effort?: string): Promise<void> {
+    assertReasoningLevel(this.reasoningCapabilities(), effort);
+    const option = this.thoughtOption();
+    if (!option || !this.active || !this.client) return;
+    const value = effort ?? this.defaultEffortValue;
+    if (value === undefined) return;
+    const updated = await this.client.request(acp.methods.agent.session.setConfigOption, { sessionId: this.active.sessionId, configId: option.id, value }) as { configOptions: any[] };
+    this.configOptions = updated.configOptions;
+    const applied = this.thoughtOption()?.currentValue;
+    if (applied !== value) throw new Error(`原生客户端将思考强度设为 ${applied ?? "未知"}，未接受 ${value}；请重新选择可用档位`);
+  }
+  async setReasoningEffort(effort: string | undefined): Promise<void> {
+    await this.ensureConnected(); await this.applyReasoning(effort); this.opts.reasoningEffort = effort;
   }
 
   private toPermissionRequest(req: acp.RequestPermissionRequest): PermissionRequest {
@@ -176,7 +217,7 @@ class AcpSession implements Session {
         tool: {
           id: update.toolCallId ?? "t",
           name: update.title ?? "tool",
-          input: (update as any).content ?? {}
+          input: (update as any).rawInput ?? (update as any).content ?? {}
         }
       });
     } else if (u === "tool_call_update") {
@@ -185,8 +226,14 @@ class AcpSession implements Session {
         toolResult: {
           id: update.toolCallId ?? "t",
           name: "tool",
-          output: JSON.stringify((update as any).content ?? {}),
-          isError: update.status === "failed"
+          output: ((update as any).content ?? []).map((item: any) => {
+            if (item.type === "content" && item.content?.type === "text") return item.content.text ?? "";
+            if (item.type === "text") return item.text ?? "";
+            if (item.type === "diff") return `修改 ${item.path ?? "文件"}`;
+            return "";
+          }).filter(Boolean).join("\n"),
+          isError: update.status === "failed",
+          status: update.status === "failed" ? "error" : update.status === "completed" ? "done" : "running"
         }
       });
     } else if (u === "usage_update") {
@@ -207,7 +254,7 @@ class AcpSession implements Session {
     const base = { sessionId: this.id, adapterId: this.spec.id, model: this.opts.model };
     const fail = (err: unknown) => ({
       type: "error" as const,
-      error: { message: err instanceof Error ? err.message : String(err) },
+      error: describeAgentError(err, [this.opts.connection?.apiKey ?? ""]),
       ...base,
       ts: Date.now()
     });
@@ -215,6 +262,7 @@ class AcpSession implements Session {
     let session: acp.ActiveSession | null;
     try {
       await this.ensureConnected();
+      if (this.opts.reasoningEffort !== undefined) await this.applyReasoning(this.opts.reasoningEffort);
     } catch (err) {
       yield fail(err);
       yield { type: "done" as const, ...base, ts: Date.now() };
@@ -225,6 +273,10 @@ class AcpSession implements Session {
       yield fail(new Error(`ACP 会话不可用（${this.spec.harnessName}）`));
       yield { type: "done" as const, ...base, ts: Date.now() };
       return;
+    }
+    const connection = session.newSessionResponse._meta?.haborConnection as AgentEvent["connection"] | undefined;
+    if (connection && typeof connection.providerId === "string" && typeof connection.modelId === "string") {
+      yield { type: "connection", connection, ...base, ts: Date.now() };
     }
 
     // 每轮 prompt 开始前，若上一轮遗留挂起的审批，先按 auto 兜底

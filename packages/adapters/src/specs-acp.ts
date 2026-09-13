@@ -12,6 +12,7 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { AcpAgentSpec } from "./acp.js";
+import { documentedReasoning } from "@agent-router/core";
 
 const NPM_FLAGS = ["-y", "--silent"];
 
@@ -39,14 +40,14 @@ export const dshAcpSpec: AcpAgentSpec = {
   id: "dsh-acp",
   harnessName: "DeepSeek Harness (ACP, in-process)",
   models: ["DeepSeek V4 Flash", "DeepSeek V4 Pro"],
-  command: ({ model }) => ({
+  command: ({ model, modelId, connection }) => ({
     cmd: process.execPath,
     argv: [resolveDshAcpEntry()],
-    env: { DSH_ACP_MODEL: model }
+    env: { DSH_ACP_MODEL: modelId ?? model, ...(connection ? { HABOR_DSH_BASE_URL: connection.baseUrl, HABOR_DSH_API_KEY: connection.apiKey } : {}) }
   }),
   isAvailable: async () => {
     try {
-      return existsSync(resolveDshAcpEntry()) || (await import("./base.js")).hasCommand("dsh-acp");
+      return existsSync(resolveDshAcpEntry()) && (await import("./base.js")).hasCommand("dsh");
     } catch {
       return false;
     }
@@ -57,7 +58,14 @@ export const kimiAcpSpec: AcpAgentSpec = {
   id: "kimi-acp",
   harnessName: "Kimi Code CLI (Kimi 官方 harness, ACP)",
   models: ["Kimi K3"],
-  command: () => ({ cmd: "kimi", argv: ["acp"] })
+  command: ({ modelId, connection }) => ({
+    cmd: "kimi", argv: connection ? ["acp"] : ["-m", modelId ?? "kimi-code/k3", "acp"],
+    ...(connection ? { env: {
+      KIMI_MODEL_NAME: modelId, KIMI_MODEL_API_KEY: connection.apiKey, KIMI_MODEL_BASE_URL: connection.baseUrl,
+      KIMI_MODEL_PROVIDER_TYPE: connection.protocol === "anthropic" ? "anthropic" : connection.protocol === "responses" ? "openai_responses" : "kimi",
+      KIMI_MODEL_CAPABILITIES: documentedReasoning("kimi-acp", modelId ?? "").levels.length ? "tool_use,thinking" : "tool_use", KIMI_DISABLE_TELEMETRY: "1"
+    } } : {})
+  })
 };
 
 export const claudeAcpSpec: AcpAgentSpec = {

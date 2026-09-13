@@ -9,6 +9,8 @@
 import type { Adapter } from "@agent-router/core";
 import { createAcpAdapter, type AcpAgentSpec } from "./acp.js";
 import { ZcodeStreamAdapter } from "./zcode-stream.js";
+import { CodexNativeAdapter } from "./codex-native.js";
+import { ClaudeNativeAdapter } from "./claude-native.js";
 import { dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec } from "./specs-acp.js";
 
 export { createCliAdapter, type CliAgentSpec } from "./framework.js";
@@ -30,8 +32,8 @@ export const ALL_ACP_SPECS: AcpAgentSpec[] = [dshAcpSpec, kimiAcpSpec, claudeAcp
  */
 export function createAdapters(): Adapter[] {
   const adapters: Adapter[] = [];
-  for (const spec of ALL_ACP_SPECS) adapters.push(createAcpAdapter(spec));
+  for (const spec of [dshAcpSpec, kimiAcpSpec]) adapters.push(createAcpAdapter(spec));
+  adapters.push(new CodexNativeAdapter(), new ClaudeNativeAdapter());
   adapters.push(new ZcodeStreamAdapter());
   return adapters;
 }
-
