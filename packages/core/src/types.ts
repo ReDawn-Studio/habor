@@ -9,7 +9,11 @@
  */
 
 /** 统一事件类型（用户蓝图的 Event union 的完整版）。 */
+import type { ApiConnection, SourceKind } from "./connections.js";
+import type { ReasoningCapabilities } from "./reasoning.js";
+
 export type AgentEventType =
+  | "connection"   // 实际执行来源的公开元数据，不包含凭据
   | "message"      // 助手文本（整段或增量）
   | "thinking"     // 推理过程
   | "tool_call"    // 工具调用
@@ -32,6 +36,8 @@ export interface ToolResultInfo {
   name: string;
   output: string;
   isError?: boolean;
+  /** Partial tool updates remain running until the transport reports completion. */
+  status?: "running" | "done" | "error";
 }
 
 export interface FileChangeInfo {
@@ -69,6 +75,7 @@ export interface AgentEvent {
   sessionId: string;
   adapterId: string;
   model: string;
+  connection?: { agent: string; providerId: string; providerName: string; modelId: string; endpointHost?: string; sourceKind: SourceKind };
   text?: string;          // message 全文（accumulated）
   delta?: string;         // message 流式增量
   thinking?: string;      // thinking 文本
@@ -95,6 +102,8 @@ export interface Session {
   cancel(): Promise<void>;
   /** 关闭/释放会话 */
   close(): Promise<void>;
+  getReasoningCapabilities?(): Promise<ReasoningCapabilities>;
+  setReasoningEffort?(effort: string | undefined): Promise<void>;
 }
 
 /** 统一审批请求（ACP requestPermission 的归一化形态）。 */
@@ -113,6 +122,12 @@ export type PermissionDecision =
 /** 会话创建选项。 */
 export interface SessionOptions {
   model: string;
+  /** Exact wire identifier; model is the user-facing selection label. */
+  modelId?: string;
+  connection?: ApiConnection;
+  reasoningEffort?: string;
+  /** Provider-declared supported wire values, scoped to this exact model/source. */
+  reasoningLevels?: string[];
   cwd: string;
   /** 权限模式（各 harness 语义不同，adapter 自行映射） */
   permission?: "ask" | "auto";
@@ -139,6 +154,10 @@ export interface Adapter {
 export interface ModelEntry {
   /** 用户可见的模型名（CLI 里只显示这个） */
   model: string;
+  modelId?: string;
+  sourceKind?: SourceKind;
+  providerId?: string;
+  reasoningLevels?: string[];
   /** 该模型对应的内部 harness id */
   adapterId: string;
   vendor: string;
