@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AGENT_NAMES, describeAgentError, toDisplayText, configuredReasoning, assertReasoningLevel, reasoningLabel, type ReasoningCapabilities, type Adapter, type AgentEvent, type Session, type SessionOptions } from "@agent-router/core";
 import { hasCommand } from "./base.js";
 import { NativeRpc, EventQueue } from "./rpc.js";
+import { agentExecutable } from "@agent-router/core";
 
 export function codexLaunch(opts: SessionOptions): { argv: string[]; env: NodeJS.ProcessEnv } {
   const argv = ["app-server", "-c", `model=${JSON.stringify(opts.modelId ?? opts.model)}`];
@@ -54,7 +55,7 @@ class CodexSession implements Session {
     try {
       if (!rpc) {
         const launch = codexLaunch(this.opts);
-        rpc = new NativeRpc(process.env.HABOR_CODEX_BIN ?? "codex", launch.argv, this.cwd, launch.env);
+        rpc = new NativeRpc(agentExecutable("codex-acp"), launch.argv, this.cwd, launch.env);
         await rpc.request("initialize", { clientInfo: { name: "habor-reasoning", version: "0.4.0" }, capabilities: { experimentalApi: false } });
         rpc.notify("initialized");
       }
@@ -74,7 +75,7 @@ class CodexSession implements Session {
     if (this.rpc && this.threadId) return;
     this.closing = false;
     const launch = codexLaunch(this.opts);
-    this.rpc = new NativeRpc(process.env.HABOR_CODEX_BIN ?? "codex", launch.argv, this.cwd, launch.env, [this.opts.connection?.apiKey ?? ""]);
+    this.rpc = new NativeRpc(agentExecutable("codex-acp"), launch.argv, this.cwd, launch.env, [this.opts.connection?.apiKey ?? ""]);
     this.rpc.onNotification = (method, params) => this.notification(method, params ?? {});
     this.rpc.onClose = error => { if (!this.closing) this.reportError(error); this.queue?.finish(); this.rpc = undefined; this.threadId = undefined; };
     this.rpc.onRequest = async (method, params) => {
@@ -149,6 +150,6 @@ export class CodexNativeAdapter implements Adapter {
   readonly id = "codex-acp";
   readonly harnessName = AGENT_NAMES.codex;
   readonly models = ["GPT-5.5", "GPT-6 Astra"];
-  isAvailable(): Promise<boolean> { return hasCommand(process.env.HABOR_CODEX_BIN ?? "codex"); }
+  isAvailable(): Promise<boolean> { return hasCommand(agentExecutable("codex-acp")); }
   async createSession(opts: SessionOptions): Promise<Session> { return new CodexSession(opts); }
 }

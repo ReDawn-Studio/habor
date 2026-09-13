@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { redactSecrets, toDisplayText, configuredReasoning, assertReasoningLevel, type ReasoningCapabilities, type Adapter, type AgentEvent, type Session, type SessionOptions } from "@agent-router/core";
 import { hasCommand } from "./base.js";
 import { EventQueue } from "./rpc.js";
+import { agentExecutable } from "@agent-router/core";
 
 export function claudeLaunch(opts: SessionOptions, sessionId: string, resume: boolean, resetEffort = false): { argv: string[]; env: NodeJS.ProcessEnv; settings?: { env: Record<string, string> } } {
   const modelId = opts.modelId ?? opts.model;
@@ -69,7 +70,7 @@ class ClaudeSession implements Session {
       writeFileSync(path, JSON.stringify(launch.settings), { mode: 0o600 });
       launch.argv.push("--settings", path);
     }
-    const child = spawn(process.env.HABOR_CLAUDE_BIN ?? "claude", launch.argv, { cwd: this.cwd, env: launch.env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(agentExecutable("claude-acp"), launch.argv, { cwd: this.cwd, env: launch.env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     let stderr = "", streamedMessage = false, failed = false;
     child.stderr.on("data", data => { stderr = (stderr + data.toString()).slice(-4000); });
@@ -113,6 +114,6 @@ export class ClaudeNativeAdapter implements Adapter {
   readonly id = "claude-acp";
   readonly harnessName = "Claude Code";
   readonly models = ["Claude Sonnet 4.6", "Claude Fable 5"];
-  isAvailable(): Promise<boolean> { return hasCommand(process.env.HABOR_CLAUDE_BIN ?? "claude"); }
+  isAvailable(): Promise<boolean> { return hasCommand(agentExecutable("claude-acp")); }
   async createSession(opts: SessionOptions): Promise<Session> { return new ClaudeSession(opts); }
 }

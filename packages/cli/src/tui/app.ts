@@ -6,6 +6,8 @@ import { displayWidth, graphemes, stripAnsi, truncateWidth, wrapText } from "./v
 import { renderMarkdown } from "./vendor/markdown.js";
 import { InputEditor } from "./editor.js";
 import { ProviderPanel } from "./provider-panel.js";
+import { AgentSetupPanel } from "./agent-setup-panel.js";
+import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 
 export const THEME = {
   primary: "d99a78", secondary: "c6b5ff", accent: "a5bdf7",
@@ -18,9 +20,10 @@ export const THEME = {
 };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const COMMAND_HINTS: Record<string, string> = {
+  "/agents": "安装与管理 Agent", "/login": "账号登录或配置 API Key",
   "/model": "选择或切换模型", "/models": "选择或切换模型", "/new": "开始新任务",
   "/status": "查看当前任务", "/tasks": "查看任务记录", "/permission": "设置权限模式",
-  "/help": "命令与快捷键", "/providers": "配置官方 / 自定义 API", "/effort": "当前模型的思考强度", "/clear": "清空当前屏幕", "/quit": "退出 habor", "/exit": "退出 habor"
+  "/help": "命令与快捷键", "/providers": "配置官方 / 自定义 API", "/refresh": "重新检测已安装的 Agent", "/effort": "当前模型的思考强度", "/clear": "清空当前屏幕", "/quit": "退出 habor", "/exit": "退出 habor"
 };
 export type BlockKind = "user" | "assistant" | "tool" | "thinking" | "usage" | "system" | "error";
 export interface Block {
@@ -41,7 +44,11 @@ export interface AppViewOptions {
   onInput: (line: string) => Promise<void> | void;
   onComplete?: (line: string) => string[];
   onSelectModel?: (model: string) => Promise<void> | void;
-  onSaveProvider?: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void>;
+  onSaveProvider?: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void | string>;
+  onOpenAgentDocs?: (model: string) => Promise<void>;
+  onInstallAgent?: (model: string, onOutput: (line: string) => void, signal: AbortSignal) => Promise<string>;
+  onLoginAgent?: (model: string, method: AuthMethod) => Promise<AuthStatus>;
+  onInspectAgentAuth?: (model: string) => Promise<AuthStatus>;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   onCancelInput?: () => void;
@@ -64,13 +71,15 @@ export class AppView {
   suggestionIndex = 0;
   showDetails = false;
   availableModels: string[] = [];
+  externalAgentModels: string[] = [];
   providers: ProviderProfile[] = [];
-  modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string }> = {};
+  modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean }> = {};
+  agentSetupPanel: AgentSetupPanel | null = null;
   providerPanel: ProviderPanel | null = null;
   reasoningEffort?: string;
   reasoningByModel: Record<string, string | undefined> = {};
   reasoningPicker: { index: number; loading: boolean; saving: boolean; error: string; capabilities: ReasoningCapabilities } | null = null;
-  modelPicker: { query: string; index: number; connecting: boolean; error: string } | null = null;
+  modelPicker: { query: string; index: number; connecting: boolean; error: string; manage?: boolean } | null = null;
   permission: "ask" | "auto" = "auto";
   private spinnerT = 0;
   private startedAt = 0;
@@ -90,8 +99,9 @@ export class AppView {
   setTask(taskId: string | null): void { if (this.taskId !== taskId) this.connectionSummary = ""; this.taskId = taskId; this.paint(); }
   setStatusText(text: string): void { this.statusText = text; this.paint(); }
   setModels(models: string[]): void {
+    const highlighted = this.modelPicker ? this.filteredModels()[this.modelPicker.index] : undefined;
     this.availableModels = models;
-    if (this.modelPicker) this.modelPicker.index = Math.max(0, this.filteredModels().indexOf(this.model ?? ""));
+    if (this.modelPicker) this.modelPicker.index = Math.max(0, this.filteredModels().indexOf(highlighted ?? this.model ?? ""));
     this.refreshSuggestions(); this.paint();
   }
   append(block: Block): void {
@@ -108,10 +118,17 @@ export class AppView {
   openModels(): void {
     if (this.modelPicker) return;
     if (this.status === "running" || this.submitting) { this.notify("回复结束后可切换模型，Esc 可停止当前回复"); return; }
-    this.modelPicker = { query: "", index: Math.max(0, this.availableModels.indexOf(this.model ?? "")), connecting: false, error: "" };
+    const current = this.availableModels.indexOf(this.model ?? "");
+    this.modelPicker = { query: "", index: current >= 0 ? current : Math.max(0, this.availableModels.findIndex(model => this.modelInfo[model]?.installed !== false)), connecting: false, error: "" };
     this.suggestions = null;
     this.paint();
   }
+  openAgents(): void {
+    if (this.status === "running" || this.submitting || this.modelPicker?.connecting) { this.notify("请在回复结束后管理 Agent"); return; }
+    this.openModels();
+    if (this.modelPicker) { this.modelPicker.manage = true; this.modelPicker.query = ""; this.modelPicker.index = 0; this.paint(); }
+  }
+  openLogin(): void { if (this.model) this.openAgentSetup(this.model); else this.openAgents(); }
 
   async openReasoning(): Promise<void> {
     if (this.reasoningPicker) return;
@@ -152,19 +169,54 @@ export class AppView {
     this.paint(); return true;
   }
 
-  openProviders(): void {
+  openProviders(adapterId?: string): void {
     if (this.status === "running" || this.submitting || this.modelPicker?.connecting) { this.notify("请在当前回复结束后配置提供商"); return; }
     this.modelPicker = null; this.suggestions = null;
     this.providerPanel = new ProviderPanel(this.providers, async (profile, key, useModelId) => {
       if (!this.opts.onSaveProvider) throw new Error("当前界面未连接提供商配置服务");
-      await this.opts.onSaveProvider(profile, key, useModelId);
-    }, showModels => { this.providerPanel = null; if (showModels) this.openModels(); else this.paint(); }, () => this.paint());
+      return this.opts.onSaveProvider(profile, key, useModelId);
+    }, (showModels, setupModel) => {
+      this.providerPanel = null;
+      if (setupModel) this.openAgentSetup(setupModel);
+      else if (showModels) this.openModels();
+      else this.paint();
+    }, () => this.paint());
+    if (adapterId) this.providerPanel.startForAgent(adapterId);
+    this.paint();
+  }
+
+  openAgentSetup(model: string): void {
+    if (this.status === "running" || this.submitting) { this.notify("请在回复结束后管理认证"); return; }
+    const info = this.modelInfo[model];
+    if (!info?.adapterId) { this.notify("未检测到所需客户端，请检查安装和 PATH"); return; }
+    this.modelPicker = null;
+    this.agentSetupPanel = new AgentSetupPanel(model, info.adapterId, info.source !== "local", async () => {
+      if (!this.opts.onOpenAgentDocs) throw new Error("安装说明服务未连接");
+      await this.opts.onOpenAgentDocs(model);
+    }, async () => {
+      if (!this.opts.onSelectModel) throw new Error("模型选择服务未连接");
+      await this.opts.onSelectModel(model);
+    }, selected => { this.agentSetupPanel = null; if (!selected) this.openModels(); else this.paint(); }, () => this.paint(), {
+      installed: info.installed !== false,
+      nativeTerminalOnly: info.nativeTerminalOnly,
+      inspect: this.opts.onInspectAgentAuth ? () => this.opts.onInspectAgentAuth!(model) : undefined,
+      install: this.opts.onInstallAgent ? (onOutput, signal) => this.opts.onInstallAgent!(model, onOutput, signal) : undefined,
+      login: this.opts.onLoginAgent ? method => this.opts.onLoginAgent!(model, method) : undefined,
+      configureApi: info.nativeTerminalOnly ? undefined : custom => { this.agentSetupPanel = null; this.openProviders(custom ? undefined : info.adapterId); if (custom) this.providerPanel?.startCustom(info.modelId); }
+    });
+    void this.agentSetupPanel.inspect();
     this.paint();
   }
 
   private filteredModels(): string[] {
     const query = this.modelPicker?.query.trim().toLowerCase() ?? "";
-    return this.availableModels.filter(model => model.toLowerCase().includes(query));
+    const representatives = new Map<string, string>();
+    for (const model of [...this.availableModels, ...this.externalAgentModels]) {
+      const id = this.modelInfo[model]?.adapterId ?? model;
+      if (!representatives.has(id) || model === this.model) representatives.set(id, model);
+    }
+    const choices = this.modelPicker?.manage ? [...representatives.values()] : this.availableModels;
+    return choices.filter(model => `${model} ${this.modelInfo[model]?.agent ?? ""}`.toLowerCase().includes(query));
   }
 
   private async selectModel(): Promise<void> {
@@ -172,6 +224,7 @@ export class AppView {
     if (!picker || picker.connecting) return;
     const model = this.filteredModels()[picker.index];
     if (!model) return;
+    if (picker.manage || this.modelInfo[model]?.installed === false) { this.openAgentSetup(model); return; }
     if (model === this.model) { this.modelPicker = null; this.paint(); return; }
     picker.connecting = true; picker.error = ""; this.paint();
     try {
@@ -217,7 +270,7 @@ export class AppView {
   }
   notify(text: string): void { this.notice = text; this.noticeUntil = Date.now() + 3500; this.paint(); }
   tick(): void {
-    if (this.status === "running") { this.spinnerT++; this.paint(); }
+    if (this.status === "running" || this.agentSetupPanel?.busy) { this.spinnerT++; this.paint(); }
     else if ((this.notice && Date.now() > this.noticeUntil) || (this.exitUntil && Date.now() > this.exitUntil)) {
       this.notice = ""; this.exitUntil = 0; this.paint();
     }
@@ -233,8 +286,10 @@ export class AppView {
   }
   handleKey(key: Key): boolean {
     const k = key.name;
+    if (this.agentSetupPanel) { this.agentSetupPanel.handle(key); return true; }
     if (this.reasoningPicker) return this.handleReasoningKey(key);
     if (this.providerPanel) { this.providerPanel.handle(key); return true; }
+    if (k === "f5") { if (this.modelPicker) { const model = this.filteredModels()[this.modelPicker.index]; if (model) this.openAgentSetup(model); } else this.openAgents(); return true; }
     if (k === "f4") { void this.openReasoning(); return true; }
     if (k === "f3") { this.openProviders(); return true; }
     if (this.modelPicker) return this.handleModelKey(key);
@@ -309,6 +364,7 @@ export class AppView {
   private acceptSuggestion(submit: boolean): void {
     const selected = this.suggestions?.[this.suggestionIndex];
     if (!selected) return;
+    if (selected === "/agents" || selected === "/login") { this.editor.set(""); if (selected === "/login") this.openLogin(); else this.openAgents(); return; }
     if (selected === "/model" || selected === "/models") {
       if (this.status === "running" || this.submitting) { this.openModels(); return; }
       this.editor.set(""); this.openModels(); return;
@@ -325,6 +381,7 @@ export class AppView {
     const text = this.input.trim();
     if (!text) return;
     if (this.submitting || this.status === "running") { this.notify("草稿已保留，回复结束后按 Enter 发送"); return; }
+    if (text === "/agents" || text === "/login") { this.editor.set(""); if (text === "/login") this.openLogin(); else this.openAgents(); return; }
     if (text === "/model" || text === "/models") { this.editor.set(""); this.openModels(); return; }
     if (text === "/providers") { this.editor.set(""); this.openProviders(); return; }
     if (text === "/effort") { this.editor.set(""); void this.openReasoning(); return; }
@@ -449,17 +506,17 @@ export class AppView {
     write(composerTop + inputH + 1, "─".repeat(width), THEME.border);
     const running = this.status === "running";
     const status = running ? `${SPINNER[this.spinnerT % SPINNER.length]} ${this.statusText || "处理中"} · ${duration(Date.now() - this.startedAt)}` : this.statusText || (this.elapsed ? `✓ 已完成 · ${duration(this.elapsed)}` : "就绪");
-    const model = this.model ? `${this.model}${this.modelInfo[this.model]?.source === "local" ? " · 本地配置" : ""}` : "未选择模型";
+    const model = this.model ? `${this.model}${this.modelInfo[this.model]?.source === "local" ? " · 本机客户端" : ""}` : "未选择模型";
     const usage = stripAnsi(this.blocks.filter(b => b.kind === "usage").at(-1)?.text);
     const statusLeft = `${model}  ·  ${reasoningLabel(this.reasoningEffort)}  ·  ${status}`;
     write(rows - 2, statusLeft, running ? THEME.warning : THEME.textMuted);
     if (usage && width - displayWidth(statusLeft) > displayWidth(usage) + 3) write(rows - 2, usage, THEME.textMuted, left + width - displayWidth(usage), displayWidth(usage));
-    const hint = Date.now() < this.noticeUntil ? this.notice : running ? "Esc / Ctrl+C 停止 · 可编辑草稿 · PgUp/PgDn 浏览" : this.suggestions !== null ? "↑↓ 选择 · Enter 确认 · Tab 补全 · Esc 收起" : width < 65 ? "F2 模型 · F3 来源 · F4 思考" : "Enter 发送 · Alt+Enter 换行 · F2 模型 · F3 来源 · F4 思考";
+    const hint = Date.now() < this.noticeUntil ? this.notice : running ? "Esc / Ctrl+C 停止 · 可编辑草稿 · PgUp/PgDn 浏览" : this.suggestions !== null ? "↑↓ 选择 · Enter 确认 · Tab 补全 · Esc 收起" : width < 65 ? "F2 模型 · F3 来源 · F4 思考 · F5 Agent" : "Enter 发送 · Alt+Enter 换行 · F2 模型 · F3 来源 · F4 思考 · F5 Agent";
     write(rows - 1, hint, THEME.textMuted);
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;
     if (this.modelPicker) this.paintModelPicker(screen);
-    if (this.providerPanel) this.paintProviderPanel(screen);
+    if (this.providerPanel || this.agentSetupPanel) this.paintProviderPanel(screen);
     if (this.reasoningPicker) this.paintReasoningPicker(screen);
     screen.defaultBackground(THEME.background);
     this.opts.terminal.paint(screen);
@@ -480,11 +537,11 @@ export class AppView {
     screen.text(left, top, "╭" + "─".repeat(width - 2) + "╮", style);
     screen.text(left, top + height - 1, "╰" + "─".repeat(width - 2) + "╯", style);
     const write = (row: number, text: string, fg = THEME.textMuted, bold = false) => screen.text(left + 2, top + row, truncateWidth(text, width - 4), makeStyle({ fg, bg: THEME.backgroundPanel, bold }));
-    write(1, "选择模型", THEME.text, true);
+    write(1, picker.manage ? "Agent 安装与认证" : "选择模型", THEME.text, true);
     const query = truncateWidth(picker.query, width - 12);
     write(2, picker.query ? `搜索：${query}` : "搜索：直接输入可筛选，也可直接按 ↑↓", picker.query ? THEME.text : THEME.textMuted);
     const info = this.modelInfo[matches[picker.index]];
-    if (info) write(3, `${info.source === "local" ? "沿用客户端登录 / Key" : info.source === "official" ? "官方 API" : "自定义 API"} → ${info.agent} · ${info.modelId}`, THEME.accent);
+    if (info) write(3, info.nativeTerminalOnly ? `官方原生终端 · ${info.agent} · 用 /model 选择型号` : `${info.source === "local" ? "客户端已配置的登录 / Key" : info.source === "official" ? "官方 API" : "自定义 API"} → ${info.agent} · ${info.modelId}`, THEME.accent);
     const start = Math.max(0, Math.min(picker.index - visible + 1, matches.length - visible));
     if (!matches.length) write(4, this.availableModels.length ? "没有匹配模型，按 Backspace 修改搜索" : "暂无可用模型，Esc 返回", THEME.warning);
     matches.slice(start, start + visible).forEach((model, i) => {
@@ -493,11 +550,12 @@ export class AppView {
       const bg = selected ? THEME.backgroundElement : THEME.backgroundPanel;
       const row = top + 4 + i;
       screen.fill(left + 1, row, width - 2, " ", makeStyle({ bg }));
-      screen.text(left + 2, row, `${selected ? "❯" : " "} ${truncateWidth(model, width - (current && width >= 24 ? 16 : 6))}`, makeStyle({ fg: selected ? THEME.text : THEME.textMuted, bg, bold: selected }));
-      if (current && width >= 24) screen.text(left + width - 10, row, "✓ 当前", makeStyle({ fg: THEME.success, bg }));
+      const missing = this.modelInfo[model]?.installed === false;
+      screen.text(left + 2, row, `${selected ? "❯" : " "} ${truncateWidth(picker.manage ? this.modelInfo[model]?.agent ?? model : model, width - ((current || missing) && width >= 24 ? 16 : 6))}`, makeStyle({ fg: selected ? THEME.text : THEME.textMuted, bg, bold: selected }));
+      if ((current || missing) && width >= 24) screen.text(left + width - 10, row, missing ? "待安装" : "✓ 当前", makeStyle({ fg: missing ? THEME.warning : THEME.success, bg }));
     });
     write(4 + visible, picker.connecting ? "正在切换模型…" : picker.error ? `切换失败：${stripAnsi(picker.error)}` : matches.length ? `${picker.index + 1} / ${matches.length} 个模型 · 思考：${reasoningLabel(this.reasoningByModel[matches[picker.index]])}` : "搜索可留空，无需输入完整模型名称", picker.error ? THEME.error : picker.connecting ? THEME.warning : THEME.textMuted);
-    write(5 + visible, "↑↓ 选择 · Enter 确认 · F3 添加来源 · Esc 返回");
+    write(5 + visible, picker.manage ? "↑↓ 选择 · Enter 安装 / 登录 / Key · Esc 返回" : info?.installed === false ? "Enter 安装 Agent · F3 配置来源 · Esc 返回" : "↑↓ 选择 · Enter 确认 · F3 来源 · F5 管理 Agent");
     screen.cursorX = Math.min(left + width - 3, left + 8 + displayWidth(query));
     screen.cursorY = top + 2;
   }
@@ -530,7 +588,8 @@ export class AppView {
   }
 
   private paintProviderPanel(screen: Screen): void {
-    const panel = this.providerPanel!, content = panel.rows();
+    const panel = (this.agentSetupPanel ?? this.providerPanel)!;
+    const content = panel.rows().map(row => ({ ...row, text: stripAnsi(row.text).replace(/[\r\n\t]+/g, " · ") }));
     const width = Math.min(86, screen.cols - 4), height = Math.min(screen.rows - 2, content.length + 4);
     const left = Math.floor((screen.cols - width) / 2), top = Math.floor((screen.rows - height) / 2);
     for (const row of screen.cells) for (const cell of row) cell.style = { ...cell.style, fg: THEME.border, bold: false };

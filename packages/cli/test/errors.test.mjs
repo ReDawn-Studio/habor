@@ -7,6 +7,18 @@ import { renderEvent } from '../dist/render.js';
 
 const subscriptionBody = '400: {"code":"InvalidSubscription","message":"Your account (example) does not have a valid AgentPlan subscription, or your subscription has expired."}';
 
+test('missing native DeepSeek credentials explain the local/API distinction and retain the required credential reference', () => {
+  const detail = 'llm-deepseek: no API key for provider route "deepseek-official"; store DEEPSEEK_OFFICIAL_API_KEY through the credentials service (the web Models page writes it), or export DEEPSEEK_OFFICIAL_API_KEY in the launching environment';
+  const result = describeAgentError({message:'Internal error',data:{details:detail}});
+  assert.equal(result.code,'DSH_CREDENTIAL_MISSING');
+  assert.match(result.message,/本机 DeepSeek Harness/);
+  assert.match(result.message,/deepseek-official/);
+  assert.match(result.message,/DEEPSEEK_OFFICIAL_API_KEY/);
+  assert.match(result.message,/dsh web/);
+  assert.match(result.message,/F2/);
+  assert.doesNotMatch(result.message,/Internal error|no API key/);
+});
+
 test('ACP Internal error unwraps data.details and explains the provider subscription failure', () => {
   const error = Object.assign(new Error('Internal error'), { code: -32603, data: { details: subscriptionBody } });
   const result = describeAgentError(error);

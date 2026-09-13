@@ -1,0 +1,52 @@
+# 更新日志
+
+## v0.5.0 — 2026-09-14
+
+本版本将 Agent 安装、原生登录与 API 来源配置整合到 habor 的终端交互中。
+
+### 新增
+
+- F5 / `/agents` 管理 Agent，`/login` 管理当前 Agent 的认证。
+- 为 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI 和 Qwen Code 提供官方 npm 包自动安装。
+- 使用 habor 私有安装目录及 npm 缓存，显示安装进度、耗时和取消入口；校验成功后启用，失败保留原有版本。
+- 提供原生浏览器授权、设备码、官方 API Key 与自定义来源的选择入口。
+- 认证时由官方客户端接管终端，完成或取消后恢复界面与草稿；授权文本不进入任务历史。
+- Gemini CLI / Qwen Code 的独立原生终端入口，可完成原生认证并使用 `/model` 选择型号。
+- 补充 Claude Fable 5.1、Opus 5、Sonnet 5、DeepSeek V4.1 Flash 和 GPT-5.6 系列的模型条目。
+- 新增主流模型、官方客户端和认证方式的来源清单。
+
+### 修复
+
+- 未安装 Agent 的模型保留在列表中并标为待安装，保存 API Key 后可以继续完成安装。
+- 安装后重新检测客户端路径；ZCode 不再只在进程启动时检测一次。
+- 明确区分本机客户端凭据与 habor API 来源 Key，改善 DSH 缺失凭据提示。
+- 原生终端返回后完整重绘，修复多行安装错误破坏终端布局的问题。
+- 针对 DSH 旧版依赖解析与桥接兼容问题，安装固定版本及显式兼容依赖集合。
+
+### 支持范围
+
+- Codex、Claude Code、Kimi Code、DSH、ZCode 支持 habor 统一任务会话。
+- Gemini / Qwen 当前使用独立原生终端，不自动继承 habor 任务文本或共享其消息流。
+- ZCode 使用官方桌面安装入口；本版本不提供未经核实的 npm 安装方式。
+- 自动安装支持 macOS / Linux；Windows 推荐 WSL，原生自动安装暂未实现。
+- DSH 使用已验证的 `0.1.0-rc.8` 及兼容依赖；当前桥接不支持 `0.1.5-rc.1`。模型版本与 Agent 版本独立，仍可调用 V4.1 Flash。
+
+### 安装
+
+要求 Node.js 22.19.0 或更新版本，以及 pnpm。下载本 Release 的源码，或检出 `v0.5.0` 标签，然后运行：
+
+```sh
+pnpm install --frozen-lockfile
+pnpm build
+pnpm habor
+```
+
+启动后按 F2 选择模型，F3 配置来源，F4 调整思考强度，F5 管理 Agent。
+本 Release 提供源码；不包含独立平台二进制，也不自动发布到 npm registry。
+
+### 验证
+
+- 57 项自动测试通过。
+- 无 Agent 的初次配置、API 来源切换、认证终端取消与恢复流程通过伪终端测试。
+- 真实 Codex 官方 npm 安装验证通过。
+- DSH 兼容安装通过原生请求、模型 / Key / 地址及 low / max 思考参数验证，原生 Web 配置入口返回 HTTP 200。

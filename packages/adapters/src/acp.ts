@@ -27,7 +27,7 @@ import type {
   Session,
   SessionOptions
 } from "@agent-router/core";
-import { runCli } from "./base.js";
+import { hasCommand } from "./base.js";
 import { describeAgentError, reasoningLabel, assertReasoningLevel, type ReasoningCapabilities } from "@agent-router/core";
 
 /** 一个原生 harness 的 ACP 接入规格。 */
@@ -51,8 +51,7 @@ export function createAcpAdapter(spec: AcpAgentSpec): Adapter {
     isAvailable: async () => {
       if (spec.isAvailable) return spec.isAvailable();
       const { cmd } = spec.command({ model: spec.models[0] ?? "" });
-      const r = await runCli({ cmd: "sh", argv: ["-lc", `command -v ${JSON.stringify(cmd)}`], timeoutMs: 10000 });
-      return r.exitCode === 0;
+      return hasCommand(cmd);
     },
     createSession: async (opts: SessionOptions) => new AcpSession(spec, opts)
   };

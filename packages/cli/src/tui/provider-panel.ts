@@ -6,7 +6,7 @@ import { displayWidth } from "./vendor/util.js";
 
 export const OFFICIAL_PROVIDERS = [
   { name: "OpenAI 官方 API", baseUrl: "https://api.openai.com/v1", models: "gpt-6-astra" },
-  { name: "Anthropic 官方 API", baseUrl: "https://api.anthropic.com", models: "claude-fable-5" },
+  { name: "Anthropic 官方 API", baseUrl: "https://api.anthropic.com", models: "claude-fable-5-1" },
   { name: "DeepSeek 官方 API", baseUrl: "https://api.deepseek.com", models: "deepseek-flash" },
   { name: "Moonshot 官方 API", baseUrl: "https://api.moonshot.cn/v1", models: "kimi-k3" },
   { name: "智谱官方 API", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: "glm-5.3" }
@@ -27,7 +27,17 @@ export class ProviderPanel {
   private agentIndex = -1;
   private protocol: ApiProtocol = "responses";
   private levelInput = new InputEditor();
-  constructor(private profiles: ProviderProfile[], private save: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void>, private close: (showModels: boolean) => void, private paint: () => void) {}
+  constructor(private profiles: ProviderProfile[], private save: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void | string>, private close: (showModels: boolean, setupModel?: string) => void, private paint: () => void) {}
+  startForAgent(adapterId: string): void {
+    const presetIndex = ({ "codex-acp": 0, "claude-acp": 1, "dsh-acp": 2, "kimi-acp": 3, zcode: 4 } as Record<string, number>)[adapterId];
+    const preset = OFFICIAL_PROVIDERS[presetIndex];
+    if (!preset) return;
+    const existing = this.profiles.find(profile => profile.kind === "official" && profile.baseUrl === preset.baseUrl);
+    this.begin("official", existing?.name ?? preset.name, preset.baseUrl, existing?.models.map(model => model.id).join(", ") ?? preset.models);
+    if (existing) { this.id = existing.id; this.existing = true; this.models = structuredClone(existing.models); }
+    this.index = 2; this.paint();
+  }
+  startCustom(modelId = ""): void { this.begin("custom", "", "", modelId); this.paint(); }
   get title(): string { return this.stage === "levels" ? "自定义模型思考档位" : this.stage === "home" ? "连接与提供商" : this.stage === "route" ? "选择执行 Agent" : this.stage === "review" || this.stage === "saving" ? "确认连接配置" : "添加 API 来源"; }
   get focusedRow(): number { return this.stage === "review" || this.stage === "saving" ? 4 + this.index : this.stage === "levels" ? 3 : this.stage === "form" ? 2 + this.index * 3 : this.stage === "route" ? 3 + Math.max(0, this.agentIndex) : this.index + 2; }
   rows(): PanelRow[] {
@@ -39,8 +49,8 @@ export class ProviderPanel {
       { text: "" }, { text: this.error || "Enter 保存该模型的声明 · Esc 返回", tone: this.error ? "error" : "muted" }
     ];
     if (this.stage === "home") return [
-      { text: "本地来源沿用客户端登录或 Key；API 来源单独配置。", tone: "muted" }, { text: "" },
-      ...["本地客户端 · 无需重复填写凭据", "+ 添加官方 API", "+ 添加自定义提供商", ...this.profiles.map(p => `${p.name} · ${p.models.length} 个模型 · 编辑`)].map((text, i) => ({ text, selected: i === this.index })),
+      { text: "本机客户端沿用其登录 / Key；API 来源由 habor 保存 Key。", tone: "muted" }, { text: "" },
+      ...["本机客户端 · 使用客户端已配置的凭据", "+ 添加官方 API", "+ 添加自定义提供商", ...this.profiles.map(p => `${p.name} · ${p.models.length} 个模型 · 编辑`)].map((text, i) => ({ text, selected: i === this.index })),
       { text: "" }, { text: "↑↓ 选择 · Enter 打开 · Esc 返回", tone: "muted" }
     ];
     if (this.stage === "official") return [{ text: "选择官方来源，地址会自动填写。", tone: "muted" }, { text: "" }, ...OFFICIAL_PROVIDERS.map((p, i) => ({ text: p.name, selected: i === this.index })), { text: "" }, { text: "↑↓ 选择 · Enter 下一步 · Esc 返回", tone: "muted" }];
@@ -174,7 +184,7 @@ export class ProviderPanel {
   private async finish(): Promise<void> {
     const key = this.fields[2].text.trim() || undefined;
     this.stage = "saving"; this.paint();
-    try { await this.save(this.profile(), key, this.models[this.index]?.id); this.fields[2].set(""); this.close(false); }
+    try { const setupModel = await this.save(this.profile(), key, this.models[this.index]?.id); this.fields[2].set(""); this.close(false, setupModel || undefined); }
     catch (error) { this.error = redactSecrets(error instanceof Error ? error.message : String(error), [key ?? ""]); this.stage = "review"; this.paint(); }
   }
 }

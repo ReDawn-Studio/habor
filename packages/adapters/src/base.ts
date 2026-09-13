@@ -99,7 +99,8 @@ export function runCliLines(opts: SpawnOptions): {
 /** 查找本机是否安装了某个命令。 */
 export async function hasCommand(cmd: string): Promise<boolean> {
   try {
-    const r = await runCli({ cmd: "sh", argv: ["-lc", `command -v ${JSON.stringify(cmd)}`] });
+    // Use the launch environment, not a login shell that may discover a different PATH.
+    const r = await runCli({ cmd: "sh", argv: ["-c", 'command -v "$1"', "habor", cmd], timeoutMs: 10000 });
     return r.exitCode === 0 && r.stdout.trim().length > 0;
   } catch {
     return false;

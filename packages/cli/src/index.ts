@@ -24,8 +24,13 @@ import { TurnEvents } from "./tui/events.js";
 import { ProviderStore } from "./providers.js";
 import { AGENT_ADAPTERS, AGENT_NAMES, reasoningLabel, configuredReasoning, type ReasoningCapabilities, type AgentKind, type ProviderProfile } from "@agent-router/core";
 import { ReasoningPreferences } from "./reasoning-preferences.js";
+import { AGENT_SETUP, EXTERNAL_AGENT_TARGETS, missingAgentMessage, openAgentInstallPage } from "./agent-setup.js";
+import { AgentInstaller } from "./agent-installer.js";
+import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus } from "./agent-auth.js";
+import { runAgentCommand } from "./agent-process.js";
+import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 
-const VERSION = "0.4.1";
+const VERSION = "0.5.0";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -52,6 +57,14 @@ if (!existsSync(stateFile)) {
 }
 
 const providers = new ProviderStore(stateDir);
+const agentInstaller = new AgentInstaller(stateDir);
+const lifecycleShutdown = new AbortController();
+let lifecycleWork: Promise<unknown> | undefined;
+async function trackLifecycle<T>(action: () => Promise<T>): Promise<T> {
+  if (lifecycleWork) throw new Error("已有安装或登录操作在进行");
+  const work = action(); lifecycleWork = work;
+  try { return await work; } finally { if (lifecycleWork === work) lifecycleWork = undefined; }
+}
 const reasoningPreferences = new ReasoningPreferences(stateDir);
 const { router, tasks, registry } = createRouter(createAdapters(), { stateFile });
 registry.configure(providers.entries(), entry => providers.connection(entry));
@@ -103,6 +116,8 @@ async function bye(): Promise<void> {
   }
   persist(true);
   tui?.stop();
+  lifecycleShutdown.abort();
+  await lifecycleWork?.catch(() => {});
   await router.close();
   console.log("\nbye");
   process.exit(0);
@@ -115,6 +130,9 @@ const HELP = `habor — 原生 Agent 聚合平台
   /model                打开模型选择面板，↑↓ 选择、Enter 确认
   /models               打开模型选择面板（管道模式列出模型）
   /providers            本地客户端 / 官方 API / 自定义提供商配置
+  /agents               管理 Agent：自动安装、原生登录或 API Key
+  /login                管理当前 Agent 的认证
+  /refresh              重新检测已安装的 Agent
   /effort [档位]        当前模型的思考强度；无参数时打开选择器
   /tasks                列出任务（绑定链）
   /new                  结束当前任务，开始新任务
@@ -130,6 +148,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   F2                    选择或切换模型（保留当前草稿）
   F3                    添加或编辑 API 来源（Key 输入隐藏）
   F4                    当前模型的思考强度；按模型与来源分别保存
+  F5                    Agent 安装与认证；模型菜单内管理选中的 Agent
   ←→ / Home / End       移动输入光标
   Alt+Enter / Ctrl+J     换行（支持的终端也可用 Shift+Enter）
   ↑↓                    历史输入 / 多行移动
@@ -158,15 +177,18 @@ function harnessForModel(model: string): string {
 async function refreshConnections(): Promise<void> {
   cachedReasoning = undefined;
   registry.configure(providers.entries(), entry => providers.connection(entry));
-  availableModels = await router.listAvailableModels();
+  const availability = await registry.availableAdapters();
+  availableModels = registry.listModels().filter(entry => availability[entry.adapterId]).map(entry => entry.model);
   if (tui) {
     tui.view.providers = providers.list();
     tui.view.reasoningByModel = Object.fromEntries(registry.listModels().map(entry => [entry.model, reasoningPreferences.get(entry)]));
     tui.view.modelInfo = Object.fromEntries(registry.listModels().map(entry => {
       const agent = (Object.keys(AGENT_ADAPTERS) as AgentKind[]).find(kind => AGENT_ADAPTERS[kind] === entry.adapterId);
-      return [entry.model, { source: entry.sourceKind ?? "local", agent: agent ? AGENT_NAMES[agent] : entry.adapterId, modelId: entry.modelId ?? entry.model }];
+      return [entry.model, { source: entry.sourceKind ?? "local", agent: agent ? AGENT_NAMES[agent] : entry.adapterId, modelId: entry.modelId ?? entry.model, adapterId: entry.adapterId, installed: !!availability[entry.adapterId] }];
     }));
-    tui.view.setModels(availableModels);
+    tui.view.externalAgentModels = EXTERNAL_AGENT_TARGETS.map(entry => entry.model);
+    for (const entry of EXTERNAL_AGENT_TARGETS) tui.view.modelInfo[entry.model] = { source: "local", agent: AGENT_SETUP[entry.adapterId].name, modelId: entry.modelId, adapterId: entry.adapterId, installed: !!executableOnPath(agentExecutable(entry.adapterId)), nativeTerminalOnly: true };
+    tui.view.setModels(registry.listModels().map(entry => entry.model));
   }
 }
 
@@ -193,7 +215,7 @@ async function setCurrentEffort(effort: string | undefined): Promise<void> {
   persist();
 }
 
-async function saveProvider(profile: ProviderProfile, key?: string, useModelId?: string): Promise<void> {
+async function saveProvider(profile: ProviderProfile, key?: string, useModelId?: string): Promise<void | string> {
   if (useModelId && !profile.models.some(model => model.id === useModelId)) throw new Error("请选择此来源中的模型");
   const oldEntry = currentTaskId ? registry.entry(router.status(currentTaskId).target?.model ?? "") : undefined;
   providers.save(profile, key);
@@ -206,6 +228,10 @@ async function saveProvider(profile: ProviderProfile, key?: string, useModelId?:
   out(`✓ 已保存 ${profile.name} · API Key 独立保存`);
   if (useModelId || oldEntry?.providerId === profile.id) {
     if (next) {
+      if (!availableModels!.includes(next.model)) {
+        out(`连接配置已保存 · 待安装 ${AGENT_SETUP[next.adapterId]?.name ?? next.adapterId} · 当前任务保留`);
+        return next.model;
+      }
       try { await selectModel(next.model); }
       catch (error) { throw new Error(`配置已保存，连接未切换：${error instanceof Error ? error.message : String(error)}`); }
     } else {
@@ -229,9 +255,19 @@ function resolveModelArg(arg: string, available: string[]): string | undefined {
 }
 
 async function selectModel(model: string): Promise<void> {
+  const external = EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+  if (external) {
+    if (!executableOnPath(agentExecutable(external.adapterId))) throw new Error(missingAgentMessage(external.adapterId));
+    await loginAgent(model, "native");
+    out(`已退出 ${AGENT_SETUP[external.adapterId].name} 独立会话，habor 原任务与草稿保留。`);
+    return;
+  }
+  // Re-probe on selection: installation may have completed while the setup panel was open.
+  await refreshConnections();
   const available = await listAvailable();
   if (!available.includes(model)) {
-    throw new Error(`模型不可用：${model}，请先安装对应的原生客户端`);
+    const entry = registry.entry(model);
+    throw new Error(entry ? missingAgentMessage(entry.adapterId) : `未知模型：${model}`);
   }
   const effort = reasoningPreferences.get(registry.entry(model)!);
   if (!currentTaskId) {
@@ -251,10 +287,51 @@ async function selectModel(model: string): Promise<void> {
   persist();
 }
 
+async function installAgent(model: string, onOutput: (line: string) => void, signal: AbortSignal): Promise<string> {
+  const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+  if (!entry) throw new Error("模型不存在");
+  return trackLifecycle(async () => {
+    const version = await agentInstaller.install(entry.adapterId, { signal: AbortSignal.any([signal, lifecycleShutdown.signal]), onOutput });
+    await refreshConnections();
+    const override = AGENT_RUNTIMES[entry.adapterId]?.override;
+    if (override && process.env[override]) throw new Error(`已安装 ${version}，但 ${override} 指定的客户端仍优先。请调整该变量后重启 habor，或继续使用指定客户端。`);
+    // A live transport continues with its old binary until the next message.
+    if (currentTaskId && registry.entry(router.status(currentTaskId).target?.model ?? "")?.adapterId === entry.adapterId) await router.refreshSession(currentTaskId);
+    return version;
+  });
+}
+
+async function loginAgent(model: string, method: AuthMethod): Promise<AuthStatus> {
+  const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+  if (!entry || !tui) throw new Error("请在交互终端中选择 Agent 登录");
+  const command = nativeLoginCommand(entry.adapterId, method, cwd);
+  return trackLifecycle(async () => {
+    const result = await tui!.withNativeTerminal(async () => {
+      const independent = EXTERNAL_AGENT_TARGETS.some(target => target.adapterId === entry.adapterId);
+      console.log(independent
+        ? `\n进入 ${AGENT_SETUP[entry.adapterId].name} 原生终端。使用 /auth 配置、/model 选型号，或开始独立对话；退出后返回 habor。原任务文本和草稿不会自动发送。\n`
+        : `\n正在进入 ${AGENT_SETUP[entry.adapterId]?.name ?? entry.adapterId} 原生认证。完成授权后返回 habor；Ctrl+C 可结束。\n`);
+      return runAgentCommand(command, { inherit: true, signal: lifecycleShutdown.signal, timeoutMs: 15 * 60 * 1000 });
+    });
+    await refreshConnections();
+    if (currentTaskId && registry.entry(router.status(currentTaskId).target?.model ?? "")?.adapterId === entry.adapterId) await router.refreshSession(currentTaskId);
+    if (method !== "native" && result.code !== 0) throw new Error("登录未完成或已取消，现有任务和草稿已保留");
+    if (method === "native" && result.code !== 0 && result.code !== 130) throw new Error("原生配置程序启动失败，请检查安装状态或端口占用后重试");
+    const status = await nativeAuthStatus(entry.adapterId, cwd);
+    if (status.state !== "unknown") return status;
+    return { state: "unknown", text: method === "native" ? "原生配置入口已打开 / 关闭；完成配置后选择使用" : "原生登录流程已完成；账号额度与模型权限在连接时验证" };
+  });
+}
+
 async function handleCommand(line: string): Promise<boolean> {
   const [cmd, ...rest] = line.trim().split(/\s+/);
   const arg = rest.join(" ");
   switch (cmd) {
+    case "/agents":
+    case "/login":
+      if (tui) { if (cmd === "/login") tui.view.openLogin(); else tui.view.openAgents(); }
+      else out("请在交互终端运行 habor，按 F5 管理 Agent 的安装与认证。");
+      return true;
     case "/effort": {
       if (!arg && tui) { void tui.view.openReasoning(); return true; }
       const capabilities = await currentReasoning();
@@ -269,19 +346,26 @@ async function handleCommand(line: string): Promise<boolean> {
       if (tui) tui.view.openProviders();
       else out("请在交互终端运行 habor，按 F3 配置提供商；不要将 API Key 写入命令行。");
       return true;
+    case "/refresh":
+      await refreshConnections();
+      if (tui) tui.view.openModels();
+      else out(`已重新检测 · ${availableModels!.length} 个模型检测到客户端；/models 查看安装状态`);
+      return true;
     case "/help":
       out(HELP);
       return true;
     case "/models": {
+      await refreshConnections();
       if (tui) { tui.view.openModels(); return true; }
       const available = await listAvailable();
       const sb: string[] = [];
-      sb.push(C.bold("\n可用模型（背后自动对应原生 harness）:"));
+      sb.push(C.bold("\n模型与客户端安装状态（认证在连接时验证）:"));
       for (const { model: m } of registry.listModels()) {
         const ok = available.includes(m);
         const entry = registry.entry(m);
         sb.push(`  ${ok ? "○" : C.dim("×")} ${C.bold(m)}${C.gray(` → ${harnessForModel(m)}`)}`);
         sb.push(C.gray(`      ${entry?.vendor} · ${entry?.display ?? ""}`));
+        if (!ok && entry) sb.push(C.yellow(`      ${missingAgentMessage(entry.adapterId)}`));
       }
       out(sb.join("\n"));
       return true;
@@ -295,10 +379,10 @@ async function handleCommand(line: string): Promise<boolean> {
         sb.push(C.gray("用法: /model <模型名>（Tab 可补全，如 /model gl → GLM-5.3）"));
         out(sb.join("\n"));
       } else {
-        const available = await listAvailable();
-        const resolved = resolveModelArg(arg, available);
+        const models = registry.listModels().map(entry => entry.model);
+        const resolved = resolveModelArg(arg, models);
         if (resolved) await selectModel(resolved);
-        else out(C.yellow(`「${arg}」未能唯一匹配。可用: ${available.join(", ")}`));
+        else out(C.yellow(`「${arg}」未能唯一匹配。请用 /models 查看模型与安装状态。`));
       }
       return true;
     case "/clear":
@@ -495,7 +579,7 @@ async function runPrompt(text: string): Promise<void> {
 
 // —— Tab 补全 ——
 
-const COMMANDS = ["model", "models", "providers", "effort", "new", "status", "tasks", "permission", "clear", "help", "quit", "exit"];
+const COMMANDS = ["model", "models", "providers", "agents", "login", "refresh", "effort", "new", "status", "tasks", "permission", "clear", "help", "quit", "exit"];
 function completeLine(line: string): string[] {
   if (line.startsWith("/effort ")) {
     const model = currentTaskId ? router.status(currentTaskId).target?.model : undefined;
@@ -506,7 +590,7 @@ function completeLine(line: string): string[] {
   }
   if (line.startsWith("/model ")) {
     const q = line.slice(7).trim().toLowerCase();
-    return (availableModels ?? [])
+    return registry.listModels().map(entry => entry.model)
       .filter((m) => m.toLowerCase().includes(q))
       .map((m) => `/model ${m}`);
   }
@@ -532,6 +616,14 @@ async function main(): Promise<void> {
       onComplete: completeLine,
       onSelectModel: selectModel,
       onSaveProvider: saveProvider,
+      onInstallAgent: installAgent,
+      onLoginAgent: loginAgent,
+      onInspectAgentAuth: async model => nativeAuthStatus((registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model))?.adapterId ?? "", cwd),
+      onOpenAgentDocs: async model => {
+        const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+        if (!entry) throw new Error("模型配置已变更，请重新选择");
+        await openAgentInstallPage(entry.adapterId);
+      },
       onGetReasoning: currentReasoning,
       onSetReasoning: setCurrentEffort,
       onInterrupt: () => {
@@ -548,12 +640,12 @@ async function main(): Promise<void> {
     process.once("SIGHUP", bye);
     await refreshConnections();
     const preferred = providers.preferredModel(registry.listModels().filter(entry => availableModels!.includes(entry.model)));
-    if (preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker) {
+    if (preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker && !tui.view.agentSetupPanel) {
       try { await selectModel(preferred.model); }
       catch (error) { out(`恢复上次连接失败：${error instanceof Error ? error.message : String(error)} · 按 F2 重新选择`); }
     }
-    if (availableModels!.length && !tui.view.input && !tui.view.blocks.length) tui.view.openModels();
-    if (!availableModels!.length) out("未检测到本地 Agent。安装 Codex / Claude Code / Kimi Code 等客户端后可复用登录，或按 F3 配置 API 来源。");
+    if (!tui.view.input && !tui.view.blocks.length && !tui.view.agentSetupPanel) tui.view.openModels();
+    if (!availableModels!.length) out("未检测到 Agent。选择模型并回车查看安装步骤；F3 可先保存 API 配置，安装后继续使用。");
     return;
   }
   const available = await listAvailable();

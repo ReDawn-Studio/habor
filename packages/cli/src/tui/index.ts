@@ -7,6 +7,7 @@
 import { Terminal } from "./vendor/term.js";
 import { AppView, type Block } from "./app.js";
 import type { ProviderProfile, ReasoningCapabilities } from "@agent-router/core";
+import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 
 export interface TuiControllerOptions {
   version: string;
@@ -16,7 +17,11 @@ export interface TuiControllerOptions {
   /** Tab 补全 */
   onComplete?: (line: string) => string[];
   onSelectModel?: (model: string) => void | Promise<void>;
-  onSaveProvider?: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void>;
+  onSaveProvider?: (profile: ProviderProfile, key?: string, useModelId?: string) => Promise<void | string>;
+  onOpenAgentDocs?: (model: string) => Promise<void>;
+  onInstallAgent?: (model: string, onOutput: (line: string) => void, signal: AbortSignal) => Promise<string>;
+  onLoginAgent?: (model: string, method: AuthMethod) => Promise<AuthStatus>;
+  onInspectAgentAuth?: (model: string) => Promise<AuthStatus>;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   /** Ctrl-C / Esc */
@@ -29,6 +34,7 @@ export class TuiController {
   view: AppView;
   private timer: ReturnType<typeof setInterval> | null = null;
   private stopped = false;
+  private nativeActive = false;
 
   constructor(private opts: TuiControllerOptions) {
     this.term = new Terminal();
@@ -40,6 +46,10 @@ export class TuiController {
       onComplete: opts.onComplete,
       onSelectModel: opts.onSelectModel,
       onSaveProvider: opts.onSaveProvider,
+      onOpenAgentDocs: opts.onOpenAgentDocs,
+      onInstallAgent: opts.onInstallAgent,
+      onLoginAgent: opts.onLoginAgent,
+      onInspectAgentAuth: opts.onInspectAgentAuth,
       onGetReasoning: opts.onGetReasoning,
       onSetReasoning: opts.onSetReasoning,
       onCancelInput: opts.onInterrupt,
@@ -68,6 +78,23 @@ export class TuiController {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.term.stop();
+  }
+
+  async withNativeTerminal<T>(action: () => Promise<T>): Promise<T> {
+    if (this.stopped || this.nativeActive) throw new Error("终端正在由其他操作使用");
+    this.nativeActive = true;
+    if (this.timer) clearInterval(this.timer);
+    this.term.stop();
+    const keepParentAlive = () => {}; // Ctrl+C reaches the foreground native client; habor resumes when it exits.
+    process.on("SIGINT", keepParentAlive);
+    try { return await action(); }
+    finally {
+      process.off("SIGINT", keepParentAlive); this.nativeActive = false;
+      if (!this.stopped) {
+        this.term.start(); this.view.paint();
+        this.timer = setInterval(() => this.view.tick(), 100);
+      }
+    }
   }
 
   // —— 数据接口（CLI 调用） ——

@@ -58,6 +58,11 @@ export const MODEL_CATALOG: ModelEntry[] = [
   },
   { model: "GPT-6 Astra", modelId: "gpt-6-astra", sourceKind: "local", adapterId: "codex-acp", vendor: "OpenAI", display: "本机 Codex · 复用登录和配置" },
   { model: "Claude Fable 5", modelId: "claude-fable-5", sourceKind: "local", adapterId: "claude-acp", vendor: "Anthropic", display: "本机 Claude Code · 复用登录和配置" },
+  { model: "Claude Fable 5.1", modelId: "claude-fable-5-1", sourceKind: "local", adapterId: "claude-acp", vendor: "Anthropic", display: "2026-09 官方主力型号 · Claude Code" },
+  { model: "Claude Opus 5", modelId: "claude-opus-5", sourceKind: "local", adapterId: "claude-acp", vendor: "Anthropic", display: "Claude Code · 账号权限在连接时验证" },
+  { model: "Claude Sonnet 5", modelId: "claude-sonnet-5", sourceKind: "local", adapterId: "claude-acp", vendor: "Anthropic", display: "Claude Code · 账号权限在连接时验证" },
+  { model: "DeepSeek V4.1 Flash", modelId: "deepseek-flash", sourceKind: "local", adapterId: "dsh-acp", vendor: "DeepSeek", display: "官方 API ID deepseek-flash · 本机 DSH 来源由原生配置决定" },
+  ...["Sol", "Terra", "Luna"].map(name => ({ model: `GPT-5.6 ${name}`, modelId: `gpt-5.6-${name.toLowerCase()}`, sourceKind: "local" as const, adapterId: "codex-acp", vendor: "OpenAI", display: "Codex CLI · 账号权限在连接时验证" })),
 ];
 
 /** 通过模型名查找其绑定的 harness。 */

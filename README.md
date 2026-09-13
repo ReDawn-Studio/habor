@@ -26,7 +26,10 @@
 
 ## 终端对话
 
+要求 Node.js 22.19.0 或更新版本，以及 pnpm。下载 Release 源码或克隆仓库后执行：
+
 ```sh
+pnpm install --frozen-lockfile
 pnpm build
 pnpm habor
 # 本机已安装 habor 启动器时，也可直接运行 habor
@@ -42,6 +45,7 @@ F2 打开面板时会保留原有草稿和光标位置。
 |---|---|
 | 选择 / 切换模型 | F2 或 `/model`，然后 ↑↓、Enter |
 | 调整当前模型思考强度 | F4 或 `/effort` |
+| 管理 Agent 安装与认证 | F5 或 `/agents`；`/login` 管理当前 Agent |
 | 发送消息 | Enter |
 | 插入换行 | Alt+Enter / Ctrl+J；支持相应键盘协议的终端也可用 Shift+Enter |
 | 编辑输入 | ← →、Home / End、Ctrl+A / E、Ctrl+U / K / W |
@@ -89,7 +93,7 @@ macOS / Linux 可运行 `python3 packages/cli/test/pty-smoke.py` 检查真实伪
 日常用 **F2** 选择模型，列表会显示来源、真实模型 ID 和执行 Agent。
 用 **F3** 或 `/providers` 添加或编辑连接：
 
-- **本地客户端**：复用本机 Codex、Claude Code、Kimi Code、ZCode、DSH 的登录与配置，不要求另填 API Key；客户端未安装时不会显示为可用。
+- **本地客户端**：复用本机 Codex、Claude Code、Kimi Code、ZCode、DSH 的登录与配置，不要求另填 API Key；客户端未安装时标为“待安装”。
 - **官方 API**：选择官方来源，地址与初始模型 ID 自动填写，输入自己的 Key。模型 ID 可以按账号实际可用的型号修改。
 - **自定义提供商**：填写名称、Base URL、Key 和模型 ID（多个用逗号分隔），逐个确认执行 Agent 与接口协议。
 
@@ -121,9 +125,49 @@ DeepSeek 官方连接在界面显示 **DeepSeek V4.1 Flash**，请求发送 `mod
 输入界面隐藏 Key，Key 不进入模型列表、对话记录或命令参数；Claude 的单次连接配置写入权限为 0600 的临时文件，并在会话关闭时清理。
 本地客户端的原有配置文件不会被这些 API 连接覆盖。
 
+### 电脑没有安装 Agent
+
+模型和 Agent 是两项依赖：API 提供模型推理，原生 Agent 执行文件操作、工具调用和任务。
+当前 habor 需要安装所选模型绑定的 Agent；填写 API Key 不会安装客户端。
+
+F2 保留所有已配置的模型，未检测到客户端时显示“待安装”。回车打开安装引导，
+可以确认并自动安装官方 npm 客户端，或进入官方安装页。F3 保存 API 来源时若缺少 Agent，
+会保留配置和 Key 并进入同一引导；当前任务和草稿保留，直到新连接成功启用。
+
+**F5 / `/agents`** 管理 Agent，**`/login`** 管理当前 Agent 的认证：
+
+- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code。使用官方 npm 包和 npmjs.org 源；安装前显示包名与本机目标目录。
+- Codex / Claude / Kimi 使用官方 npm `latest`；DSH 自建桥接固定在已验证的 `0.1.0-rc.8`。实测 `0.1.5-rc.1` 虽可安装，但现有桥接无法完成 ACP 连接，因此暂不启用。Agent 程序版本和模型版本独立，兼容版本仍可调用 V4.1 Flash。
+- DSH 显式安装已验证的 peer 依赖集合，再使用 `--legacy-peer-deps` 避开 npm 的循环 peer 解析；并非只跳过所需依赖。
+- 包下载到 `~/.habor/agents/<adapter>/versions/<installation-id>`，通过包标识与可执行文件版本检查后，原子更新 `active.json`。失败或取消不会切换到半安装版本；旧版本留存。
+- npm 使用 `~/.habor/npm-cache`，避免系统 npm 缓存的权限问题；不需要对原有 npm 目录执行 `sudo chown`。
+- 优先级为用户显式指定的客户端路径、habor 托管版本、PATH 中的客户端。托管安装不改系统全局安装，不需要管理员权限，也无需重启。显式路径覆盖仍优先时界面会提示。
+- Codex 提供浏览器登录与设备码；Claude 提供原生账号登录；Kimi 提供原生设备码；DSH 可打开 Web 配置；ZCode 可打开官方应用认证。
+- 登录阶段临时将终端交给官方客户端。验证码、浏览器授权和输入由客户端处理，凭据由其保存与刷新；退出或 Ctrl+C 后恢复 habor 的界面和草稿。认证输出不进入任务历史。
+- 官方 API Key 直接进入预填地址的隐藏输入表单；自定义来源可填写 URL、Key 和模型，并明确选择执行 Agent。已保存的 API 来源无需再进行订阅登录。
+- 登录状态仅在原生客户端明确报告时显示“已认证”；安装成功、配置文件存在或启动桌面软件都不等于认证成功。账号额度与具体模型权限在连接时验证。
+- Gemini CLI / Qwen Code 位于 F5 的 Agent 列表，提供自动安装、原生 `/auth` 配置与明确标注的“独立会话”入口。它们暂不出现在 F2 的 habor 会话路由中；原任务文本和草稿不会自动发送到外部终端，退出后回到原任务。
+
+ZCode 没有在本项目中核实可用于自动安装的官方 npm 分发，继续提供官方桌面安装入口。
+Windows 原生自动安装尚未实现，可使用 WSL 或官方安装页。外部安装改变 PATH 后需重启 habor；`/refresh` 可重新检测当前环境。
+
+官方安装说明：[Codex CLI](https://learn.chatgpt.com/docs/codex/cli)、
+[Claude Code](https://code.claude.com/docs/en/setup)、
+[Kimi Code CLI](https://moonshotai.github.io/kimi-code/en/guides/getting-started)、
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)、
+[ZCode](https://zcode.z.ai/cn/docs/install)。
+
+ZCode 默认检测 macOS 的 `/Applications` 和 `~/Applications`。
+其他安装位置或系统需通过 `ZCODE_CLI` 指向应用内的 `zcode.cjs`；不会把无效的自定义路径静默替换成其他安装。
+
+主流模型、官方 Agent、认证方式及接入边界见 [2026-09 模型与 Agent 清单](docs/model-agent-catalog-2026-09.md)。
+
 ### 模型不一致与连接错误
 
 本地 DSH 会复用其保存的提供商配置，因此“DeepSeek 模型”不等于“DeepSeek 官方 API”。
+“本机客户端”指在电脑上运行 Agent，仍通过 DSH 配置的 API 调用模型。
+DSH 的本机凭据与 habor 的 API 来源 Key 分别保存；若提示 `DSH_CREDENTIAL_MISSING`，
+运行 `dsh web`，在 Models 页面为错误中指定的来源填写 Key，或用 F2 选择已配置的 habor API 来源。
 建立会话后会显示实际提供商与服务域名。
 当上游返回 `InvalidSubscription` 时，界面会明确提示该 API 来源的订阅无效或已过期；
 这类错误需要在对应服务处理，或通过 F3 添加有效连接并选择“保存并使用”。

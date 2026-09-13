@@ -9,11 +9,10 @@
  * session.events），但这里是长驻服务，Agent 跨多轮 prompt 存活。
  */
 import { createRequire } from "node:module";
-import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { reasoningLabel, assertReasoningLevel, type AgentEvent, type ReasoningCapabilities } from "@agent-router/core";
+import { reasoningLabel, assertReasoningLevel, dshPackageAnchor, type AgentEvent, type ReasoningCapabilities } from "@agent-router/core";
 
 export interface DshRuntime {
   req: ReturnType<typeof createRequire>;
@@ -23,15 +22,7 @@ export interface DshRuntime {
 
 /** 通过 PATH 定位 dsh 安装的 package.json（createRequire 锚点）。 */
 export function resolveDshInstall(): string | null {
-  try {
-    const out = execFileSync("sh", ["-lc", "command -v dsh"], { encoding: "utf8" }).trim();
-    if (!out) return null;
-    const real = realpathSync(out); // .../@deepseek-ai/dsh/lib/bin.js
-    const pkg = join(dirname(dirname(real)), "package.json");
-    return existsSync(pkg) ? pkg : null;
-  } catch {
-    return null;
-  }
+  return dshPackageAnchor() ?? null;
 }
 
 /** in-process 引导 DSH 核心树。 */

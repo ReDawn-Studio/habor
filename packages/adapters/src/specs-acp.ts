@@ -12,7 +12,7 @@
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { AcpAgentSpec } from "./acp.js";
-import { documentedReasoning } from "@agent-router/core";
+import { documentedReasoning, agentExecutable, dshPackageAnchor } from "@agent-router/core";
 
 const NPM_FLAGS = ["-y", "--silent"];
 
@@ -47,7 +47,7 @@ export const dshAcpSpec: AcpAgentSpec = {
   }),
   isAvailable: async () => {
     try {
-      return existsSync(resolveDshAcpEntry()) && (await import("./base.js")).hasCommand("dsh");
+      return existsSync(resolveDshAcpEntry()) && !!dshPackageAnchor();
     } catch {
       return false;
     }
@@ -59,7 +59,7 @@ export const kimiAcpSpec: AcpAgentSpec = {
   harnessName: "Kimi Code CLI (Kimi 官方 harness, ACP)",
   models: ["Kimi K3"],
   command: ({ modelId, connection }) => ({
-    cmd: "kimi", argv: connection ? ["acp"] : ["-m", modelId ?? "kimi-code/k3", "acp"],
+    cmd: agentExecutable("kimi-acp"), argv: connection ? ["acp"] : ["-m", modelId ?? "kimi-code/k3", "acp"],
     ...(connection ? { env: {
       KIMI_MODEL_NAME: modelId, KIMI_MODEL_API_KEY: connection.apiKey, KIMI_MODEL_BASE_URL: connection.baseUrl,
       KIMI_MODEL_PROVIDER_TYPE: connection.protocol === "anthropic" ? "anthropic" : connection.protocol === "responses" ? "openai_responses" : "kimi",

@@ -34,6 +34,10 @@ export function describeAgentError(error: unknown, secrets: string[] = []): { me
   const detail = messages.find(message => !generic.test(message)) ?? messages[0] ?? toDisplayText(error);
   const safe = redactSecrets(detail, secrets);
   const providerCode = safe.match(/"code"\s*:\s*"([\w.-]+)"/)?.[1] ?? code;
+  const missingDshKey = safe.match(/llm-deepseek: no API key for provider route "([^"]+)"; store ([A-Z_][A-Z0-9_]*)/i);
+  if (missingDshKey) {
+    return { code: "DSH_CREDENTIAL_MISSING", message: `本机 DeepSeek Harness 尚未配置此来源的 API Key。\n来源：${missingDshKey[1]} · 凭据：${missingDshKey[2]}\n“本机客户端”沿用 DSH 配置，模型仍通过其 API 连接调用。\n运行 dsh web，在 Models 页面配置此来源；或按 F2 选择已保存 Key 的 habor API 来源。` };
+  }
   if (/requires? a newer version of Codex/i.test(safe)) {
     const model = safe.match(/['"]([^'"]+)['"]\s+model/i)?.[1];
     return { code: "CODEX_UPGRADE_REQUIRED", message: `${model ?? "当前模型"} 需要更新版本的 Codex CLI。\n请运行 codex update 升级，然后退出并重新启动 habor。` };

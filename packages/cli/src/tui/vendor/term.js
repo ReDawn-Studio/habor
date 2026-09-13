@@ -363,6 +363,7 @@ export class Terminal extends EventEmitter {
   start() {
     if (this.started) return
     this.started = true
+    this._prev = undefined
     this.cols = this.output.columns || 80
     this.rows = this.output.rows || 24
     if (this.input.isTTY) {

@@ -20,15 +20,13 @@ import { toDisplayText, assertReasoningLevel, reasoningLabel, type ReasoningCapa
 const ZCODE_MODELS = ["GLM-5.3"];
 
 function resolveZcodeCli(): string | undefined {
-  if (process.env.ZCODE_CLI && existsSync(process.env.ZCODE_CLI)) return process.env.ZCODE_CLI;
+  if (process.env.ZCODE_CLI) return existsSync(process.env.ZCODE_CLI) ? process.env.ZCODE_CLI : undefined;
   const candidates = [
     "/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs",
     join(homedir(), "Applications/ZCode.app/Contents/Resources/glm/zcode.cjs")
   ];
   return candidates.find((p) => existsSync(p));
 }
-
-const cliPath = resolveZcodeCli();
 
 /** 简易 JSON-RPC 行协议（ZCode Protocol 不接受 jsonrpc 字段）。 */
 class ZcodeRpc {
@@ -135,6 +133,7 @@ class ZcodeSession implements Session {
 
   private doConnect(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
+      const cliPath = resolveZcodeCli();
       if (!cliPath) return reject(new Error("未找到 ZCode CLI（zcode.cjs）"));
       const proc = spawn(process.execPath, [cliPath, "app-server"], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...(this.opts?.connection ? { HABOR_PROVIDER_KEY: this.opts.connection.apiKey } : {}) } });
       this.proc = proc;
@@ -378,7 +377,7 @@ export class ZcodeStreamAdapter implements Adapter {
   readonly models = ZCODE_MODELS;
 
   async isAvailable(): Promise<boolean> {
-    return cliPath !== undefined;
+    return resolveZcodeCli() !== undefined;
   }
 
   async createSession(opts: SessionOptions): Promise<Session> {
