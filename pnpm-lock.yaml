@@ -40,6 +40,9 @@ importers:
 
   packages/dsh-acp:
     dependencies:
+      '@agent-router/core':
+        specifier: workspace:*
+        version: link:../core
       '@agentclientprotocol/sdk':
         specifier: ^1.4.0
         version: 1.4.0(zod@4.5.1)

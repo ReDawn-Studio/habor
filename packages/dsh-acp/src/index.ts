@@ -20,9 +20,15 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
 import { bootDsh, createDshAgent, type DshAgentHandle, type DshRuntime } from "./dsh-runtime.js";
+import { describeAgentError } from "@agent-router/core";
 
 const MODEL = process.env.DSH_ACP_MODEL;
 const CONTEXT_SIZE = Number(process.env.DSH_ACP_CONTEXT_SIZE ?? 128000);
+
+function reasoningConfig(handle: DshAgentHandle): acp.SessionConfigOption[] {
+  return [{ id: "reasoning_effort", name: "思考强度", category: "thought_level", type: "select", currentValue: handle.getReasoningEffort() ?? "default",
+    options: [{ value: "default", name: "原生默认" }, ...handle.reasoning.levels.map(level => ({ value: level.id, name: level.label }))] }];
+}
 
 interface SessionRecord {
   handle: DshAgentHandle;
@@ -158,6 +164,7 @@ async function main(): Promise<void> {
       const handle = await createDshAgent(runtime, {
         cwd,
         model,
+        reasoningEffort: process.env.DSH_ACP_REASONING_EFFORT,
         onApproval: async (req) => {
           const rec = sessions.get(sessionId);
           if (!rec?.cx) return "unavailable";
@@ -182,7 +189,15 @@ async function main(): Promise<void> {
         }
       });
       sessions.set(sessionId, { handle, cx: null, watermark: 0, usage: null, chunked: false });
-      return { sessionId };
+      return { sessionId, configOptions: reasoningConfig(handle), _meta: { haborConnection: { ...handle.connection }, haborReasoning: { ...handle.reasoning } } };
+    })
+    .onRequest(acp.methods.agent.session.setConfigOption, async ctx => {
+      const rec = sessions.get(ctx.params.sessionId);
+      if (!rec) throw new Error("session not found");
+      if (ctx.params.configId !== "reasoning_effort") throw new Error("未知配置项");
+      if (typeof ctx.params.value !== "string") throw new Error("思考强度必须是字符串");
+      rec.handle.setReasoningEffort(ctx.params.value === "default" ? undefined : ctx.params.value);
+      return { configOptions: reasoningConfig(rec.handle) };
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
       const rec = sessions.get(ctx.params.sessionId);
@@ -201,15 +216,17 @@ async function main(): Promise<void> {
               return { stopReason: "end_turn" as const };
             }
             if (kind === "error") {
-              throw new Error(reason?.error?.message ?? reason?.error?.code ?? "DSH turn error");
+              const failure = describeAgentError(reason?.error ?? "DSH turn error", [process.env.HABOR_DSH_API_KEY ?? "", process.env.DEEPSEEK_API_KEY ?? ""]);
+              throw new acp.RequestError(-32603, failure.message, { code: failure.code ?? "DSH_ERROR" });
             }
             return { stopReason: "cancelled" as const };
           }
           await sleep(30);
         }
       } catch (err) {
-        console.error("[dsh-acp] prompt handler error:", err instanceof Error ? (err.stack ?? err.message) : String(err));
-        throw err;
+        const details = describeAgentError(err, [process.env.HABOR_DSH_API_KEY ?? "", process.env.DEEPSEEK_API_KEY ?? ""]);
+        console.error(`[dsh-acp] ${details.code ?? "prompt"}: ${details.message}`);
+        throw new acp.RequestError(-32603, details.message, { code: details.code ?? "DSH_ERROR" });
       } finally {
         rec.cx = null;
       }

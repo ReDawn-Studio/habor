@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { reasoningLabel, assertReasoningLevel, type AgentEvent, type ReasoningCapabilities } from "@agent-router/core";
 
 export interface DshRuntime {
   req: ReturnType<typeof createRequire>;
@@ -49,6 +50,7 @@ export async function bootDsh(): Promise<DshRuntime> {
   const patches: any[] = [
     ...(base?.patches ?? []),
     { id: "hmr", disabled: true },
+    ...(process.env.HABOR_DSH_BASE_URL ? [{ id: "agent-default-model", config: { provider: "habor-api", model: process.env.DSH_ACP_MODEL } }] : []),
     { id: "tools", config: { mode: process.env.DSH_TOOLS_MODE } },
     {
       id: "system-prompt",
@@ -69,11 +71,22 @@ export async function bootDsh(): Promise<DshRuntime> {
     hostCtx.provide("dsh:launch-environment", {});
   });
   await ctx.get("loader")?.await();
+  let apiRoute: (() => void) | undefined;
+  if (process.env.HABOR_DSH_BASE_URL && process.env.HABOR_DSH_API_KEY) {
+    const { DeepSeekAdapter, resolveAdapterOptions } = req("@deepseek-ai/dsh-llm-deepseek");
+    const { getOrCreateAnonymousUserId } = req("@deepseek-ai/dsh-anonymous-user-id");
+    const connection = resolveAdapterOptions({ baseURL: process.env.HABOR_DSH_BASE_URL, apiKeyEnv: "HABOR_DSH_API_KEY", models: [{ id: process.env.DSH_ACP_MODEL }] });
+    apiRoute = ctx.get("llm").registerAdapter(["habor-api"], new DeepSeekAdapter({
+      options: () => connection, resolveApiKey: async () => process.env.HABOR_DSH_API_KEY!,
+      resolveUserId: getOrCreateAnonymousUserId, resolveAttachments: () => ctx.get("attachments")
+    }));
+  }
 
   return {
     req,
     ctx,
     async dispose() {
+      apiRoute?.();
       await ctx.fiber?.dispose();
     }
   };
@@ -93,6 +106,10 @@ function resolveModelId(model: string | undefined): string {
 /** 一个长驻 DSH Agent 句柄（跨多轮 prompt 存活，保留会话记忆）。 */
 export interface DshAgentHandle {
   agent: any;
+  connection: NonNullable<AgentEvent["connection"]>;
+  reasoning: ReasoningCapabilities;
+  getReasoningEffort(): string | undefined;
+  setReasoningEffort(effort: string | undefined): void;
   /** 提交一条用户消息（不等待） */
   followup(text: string): void;
   /** 事件日志（追加式数组，按 index 水位消费） */
@@ -103,6 +120,7 @@ export interface DshAgentHandle {
 export interface CreateDshAgentOptions {
   cwd: string;
   model?: string;
+  reasoningEffort?: string;
   /** 审批应答器：返回 "allowed-once" | "rejected" | "unavailable" */
   onApproval?: (req: { id: string; toolName: string; callId?: string; reason?: string }) => Promise<string>;
 }
@@ -121,15 +139,35 @@ export async function createDshAgent(
   const { installModelSelection } = req("@deepseek-ai/dsh-agent");
 
   const selection = defaultModel.currentSelection();
-  const provider = process.env.DSH_ACP_PROVIDER ?? selection.provider;
+  const provider = process.env.HABOR_DSH_BASE_URL ? "habor-api" : process.env.DSH_ACP_PROVIDER ?? selection.provider;
   const model = resolveModelId(opts.model ?? process.env.DSH_ACP_MODEL ?? selection.model);
+  const llm = ctx.get("llm");
+  const modelInfo = await llm.resolveModelInfo(provider, model);
+  const nativeDefault = selection.provider === provider && resolveModelId(selection.model) === model ? selection.reasoningEffort : undefined;
+  const reasoning: ReasoningCapabilities = { source: "native", defaultId: nativeDefault ?? modelInfo.reasoning?.defaultEffort,
+    levels: (modelInfo.reasoning?.efforts ?? []).map((level: any) => ({ id: level.id, label: reasoningLabel(level.id), description: level.description })) };
+  let effort = opts.reasoningEffort;
+  assertReasoningLevel(reasoning, effort);
+  const modelSelection = { current: { provider, model, reasoningEffort: effort ?? nativeDefault }, assembled: undefined };
+  const providerInfo = llm.listProviders().find((entry: any) => entry.id === provider);
+  const configurable = llm.listConfigurableProviders().find((entry: any) => entry.provider === provider);
+  // Read the public, redacted settings descriptor. Do not copy raw provider settings into ACP metadata.
+  const descriptors = ctx.get("settings")?.describe({ redactSecrets: true }) ?? [];
+  let config = descriptors.find((entry: any) => entry.ns === configurable?.settingsNs)?.value;
+  for (const key of configurable?.settingsPath ?? []) config = config?.[key];
+  let endpointHost: string | undefined;
+  try { endpointHost = new URL(process.env.HABOR_DSH_BASE_URL ?? config?.baseURL).host; } catch { /* Provider may use its own default endpoint. */ }
+  const connection: NonNullable<AgentEvent["connection"]> = {
+    agent: "DeepSeek Harness", providerId: provider, providerName: providerInfo?.name ?? provider,
+    modelId: model, endpointHost, sourceKind: process.env.HABOR_DSH_BASE_URL ? "custom" : "local"
+  };
 
   const { agent } = await agents.create({
     sessionId: SessionId(`acp-${randomUUID().slice(0, 8)}`),
     meta: { cwd: opts.cwd },
-    agentOptions: { provider, model },
+    agentOptions: { provider, model, reasoningEffort: effort ?? nativeDefault },
     setup: (agentCtx: any) => {
-      installModelSelection(agentCtx, { current: { provider, model }, assembled: void 0 });
+      installModelSelection(agentCtx, modelSelection);
       if (opts.onApproval) {
         // 审批应答器：DSH 的 approval/request waterfall → ACP requestPermission
         agentCtx.on("approval/request", async (req: any) => {
@@ -152,6 +190,10 @@ export async function createDshAgent(
 
   return {
     agent,
+    connection,
+    reasoning,
+    getReasoningEffort: () => effort,
+    setReasoningEffort: value => { assertReasoningLevel(reasoning, value); effort = value; modelSelection.current = { provider, model, reasoningEffort: value ?? nativeDefault }; },
     followup: (text: string) => {
       agent.followup(
         createUserMessage({ content: [{ type: "text", text }], source: { kind: "user" } })
