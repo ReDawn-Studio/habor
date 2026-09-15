@@ -30,8 +30,9 @@ import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus 
 import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
+import { isCasualGreeting } from "./prompt-intent.js";
 
-const VERSION = "0.5.4";
+const VERSION = "0.5.5";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -531,6 +532,24 @@ async function runPrompt(text: string): Promise<void> {
     tui?.view.setInput(text);
     return;
   }
+  // Ctrl+C stops a turn but intentionally keeps its native session alive. A standalone
+  // greeting after coding/tool activity is a new conversational intent, so isolate it
+  // in a fresh task instead of letting the coding harness continue the old work.
+  if (isCasualGreeting(text)) {
+    const previousTaskId = currentTaskId;
+    const previous = router.status(previousTaskId);
+    if (previous.task.conversation.length > 0 && !cancelRequested) {
+      const model = previous.target?.model;
+      if (model) {
+        currentTaskId = null;
+        tui?.setTask(null); tui?.setModel(null);
+        await selectModel(model);
+        out("✓ 这是新的闲聊任务；之前的代码任务仍可用 /resume 恢复");
+      }
+    }
+  }
+  const activeTaskId = currentTaskId;
+  if (!activeTaskId) throw new Error("没有可用的当前任务");
   tui?.beginTurn();
 
   if (tui) {
@@ -538,7 +557,7 @@ async function runPrompt(text: string): Promise<void> {
     tui.append({ kind: "user", text });
     const events = new TurnEvents(tui.view);
     try {
-      for await (const ev of router.continueTask(currentTaskId, text)) {
+      for await (const ev of router.continueTask(activeTaskId, text)) {
         if (cancelRequested) break;
         events.accept(ev);
         if (ev.type === "done") break;
@@ -582,7 +601,7 @@ async function runPrompt(text: string): Promise<void> {
     if (rest) writeMd(rest);
   };
   try {
-    for await (const ev of router.continueTask(currentTaskId, text)) {
+    for await (const ev of router.continueTask(activeTaskId, text)) {
       if (ev.type === "message") {
         endThinking();
         if (!inAssistant) {
