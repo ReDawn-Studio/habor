@@ -77,3 +77,12 @@ test('workspace trust is explicit, persists by canonical directory, and gates mo
     view.openWorkspaceTrust();view.handleKey({name:'down'});view.handleKey({name:'return'});assert.equal(denied,1);
   } finally {rmSync(dir,{recursive:true,force:true})}
 });
+
+test('resume opens an interactive current-workspace task picker instead of duplicating /tasks output', async () => {
+  let resumed;
+  const view=new AppView({terminal:{cols:100,rows:30,paint(){}},version:'test',onInput(){},onResumeTask:async id=>{resumed=id}});
+  view.openResume([{id:'task-one',title:'当前项目任务',model:'GPT-6 Astra',messages:4}]);
+  assert.ok(view.resumePanel);assert.match(view.resumePanel.rows().map(row=>row.text).join('\n'),/当前项目任务/);
+  view.handleKey({name:'return'});await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(resumed,'task-one');assert.equal(view.resumePanel,null);
+});

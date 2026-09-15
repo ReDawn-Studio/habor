@@ -31,7 +31,7 @@ import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
 
-const VERSION = "0.5.6";
+const VERSION = "0.5.7";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -428,7 +428,8 @@ async function handleCommand(line: string): Promise<boolean> {
     case "/resume": {
       const list = tasksInCurrentWorkspace();
       if (!arg) {
-        if (!list.length) out(C.yellow("当前工作区暂无历史任务。"));
+        if (tui) { tui.view.openResume(list.slice(0, 12).map(task => ({ id: task.id, title: task.title, model: task.bindings.at(-1)?.model ?? "未选择模型", messages: task.conversation.length }))); }
+        else if (!list.length) out(C.yellow("当前工作区暂无历史任务。"));
         else { const lines = [C.bold("当前工作区历史任务（使用 /resume <任务 ID> 恢复）:")]; list.slice(0, 12).forEach((task, index) => lines.push(`  ${index + 1}. ${task.id}  ${task.title} · ${task.conversation.length} 条消息`)); out(lines.join("\n")); }
         return true;
       }
@@ -684,6 +685,7 @@ async function main(): Promise<void> {
       onCheckWorkspaceTrust: () => workspaceTrust.isTrusted(cwd),
       onTrustWorkspace: async () => { workspaceTrust.trust(cwd); out("✓ 已信任当前工作区"); },
       onWorkspaceTrustDenied: () => { void bye(); },
+      onResumeTask: resumeTask,
       onOpenAgentDocs: async model => {
         const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
         if (!entry) throw new Error("模型配置已变更，请重新选择");

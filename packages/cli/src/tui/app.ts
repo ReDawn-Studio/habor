@@ -8,6 +8,7 @@ import { InputEditor } from "./editor.js";
 import { ProviderPanel } from "./provider-panel.js";
 import { AgentSetupPanel } from "./agent-setup-panel.js";
 import { WorkspaceTrustPanel } from "./trust-panel.js";
+import { ResumePanel, type ResumeCandidate } from "./resume-panel.js";
 import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 
 export const THEME = {
@@ -81,6 +82,7 @@ export class AppView {
   modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean }> = {};
   agentSetupPanel: AgentSetupPanel | null = null;
   trustPanel: WorkspaceTrustPanel | null = null;
+  resumePanel: ResumePanel | null = null;
   private pendingTrustModel: string | undefined;
   providerPanel: ProviderPanel | null = null;
   reasoningEffort?: string;
@@ -149,6 +151,13 @@ export class AppView {
     if (this.modelPicker) { this.modelPicker.manage = true; this.modelPicker.query = ""; this.modelPicker.index = 0; this.paint(); }
   }
   openLogin(): void { if (this.model) this.openAgentSetup(this.model); else this.openAgents(); }
+  openResume(candidates: ResumeCandidate[]): void {
+    if (!candidates.length) { this.notify("当前工作区暂无历史任务"); return; }
+    if (!this.opts.onResumeTask) { this.notify("历史任务恢复服务未连接"); return; }
+    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null;
+    this.resumePanel = new ResumePanel(candidates, id => this.opts.onResumeTask!(id), () => { this.resumePanel = null; this.paint(); }, () => this.paint());
+    this.paint();
+  }
   openWorkspaceTrust(model?: string): void {
     if (this.trustPanel) return;
     this.modelPicker = null; this.pendingTrustModel = model;
@@ -324,6 +333,7 @@ export class AppView {
   handleKey(key: Key): boolean {
     const k = key.name;
     if (this.trustPanel) { this.trustPanel.handle(key); return true; }
+    if (this.resumePanel) { this.resumePanel.handle(key); return true; }
     if (this.agentSetupPanel) { this.agentSetupPanel.handle(key); return true; }
     if (this.reasoningPicker) return this.handleReasoningKey(key);
     if (this.providerPanel) { this.providerPanel.handle(key); return true; }
@@ -558,7 +568,7 @@ export class AppView {
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;
     if (this.modelPicker) this.paintModelPicker(screen);
-    if (this.providerPanel || this.agentSetupPanel || this.trustPanel) this.paintProviderPanel(screen);
+    if (this.providerPanel || this.agentSetupPanel || this.trustPanel || this.resumePanel) this.paintProviderPanel(screen);
     if (this.reasoningPicker) this.paintReasoningPicker(screen);
     screen.defaultBackground(THEME.background);
     this.opts.terminal.paint(screen);
@@ -630,7 +640,7 @@ export class AppView {
   }
 
   private paintProviderPanel(screen: Screen): void {
-    const panel = (this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
+    const panel = (this.resumePanel ?? this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
     const content = panel.rows().map(row => ({ ...row, text: stripAnsi(row.text).replace(/[\r\n\t]+/g, " · ") }));
     const width = Math.min(86, screen.cols - 4), height = Math.min(screen.rows - 2, content.length + 4);
     const left = Math.floor((screen.cols - width) / 2), top = Math.floor((screen.rows - height) / 2);
