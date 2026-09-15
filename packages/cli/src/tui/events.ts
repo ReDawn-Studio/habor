@@ -24,6 +24,7 @@ export class TurnEvents {
         break;
       }
       case "message": {
+        this.view.finishThinking();
         let delta = ev.delta;
         if (delta === undefined) {
           const text = ev.text ?? "";
@@ -35,10 +36,11 @@ export class TurnEvents {
         break;
       }
       case "thinking":
-        if (ev.thinking) this.view.append({ kind: "thinking", text: ev.thinking, meta: { delta: ev.thinking } });
+        if (ev.thinking) { this.view.startThinking(); this.view.append({ kind: "thinking", text: ev.thinking, meta: { delta: ev.thinking } }); }
         this.view.setStatusText("正在思考");
         break;
       case "tool_call": {
+        this.view.finishThinking();
         const tool = ev.tool;
         if (!tool) break;
         const existing = this.tools.get(tool.id);

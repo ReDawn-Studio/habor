@@ -31,7 +31,7 @@ import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
 
-const VERSION = "0.5.2";
+const VERSION = "0.5.3";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -659,7 +659,6 @@ async function main(): Promise<void> {
       try { await selectModel(preferred.model); }
       catch (error) { out(`恢复上次连接失败：${error instanceof Error ? error.message : String(error)} · 按 F2 重新选择`); }
     }
-    if (!tui.view.input && !tui.view.blocks.length && !tui.view.agentSetupPanel) tui.view.openModels();
     if (!availableModels!.length) out("未检测到 Agent。选择模型并回车查看安装步骤；F3 可先保存 API 配置，安装后继续使用。");
     return;
   }

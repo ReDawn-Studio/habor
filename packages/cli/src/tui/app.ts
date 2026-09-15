@@ -90,6 +90,8 @@ export class AppView {
   private spinnerT = 0;
   private startedAt = 0;
   private elapsed = 0;
+  private thinkingStartedAt = 0;
+  private thinkingElapsed = 0;
   private submitting = false;
   private exitUntil = 0;
   private notice = "";
@@ -104,6 +106,9 @@ export class AppView {
   setModel(model: string | null): void { if (this.model !== model) this.connectionSummary = ""; this.model = model; this.statusText = ""; this.paint(); }
   setTask(taskId: string | null): void { if (this.taskId !== taskId) this.connectionSummary = ""; this.taskId = taskId; this.paint(); }
   setStatusText(text: string): void { this.statusText = text; this.paint(); }
+  startThinking(): void { if (!this.thinkingStartedAt) { this.thinkingStartedAt = Date.now(); this.thinkingElapsed = 0; } this.paint(); }
+  finishThinking(): void { if (this.thinkingStartedAt) { this.thinkingElapsed = Date.now() - this.thinkingStartedAt; this.thinkingStartedAt = 0; const block = [...this.blocks].reverse().find(item => item.kind === "thinking"); if (block) block.meta = { ...block.meta, status: `duration:${this.thinkingElapsed}` }; this.paint(); } }
+  addTurnSummary(): void { if (this.elapsed > 0) this.append({ kind: "system", text: `* Worked for ${Math.max(1, Math.round(this.elapsed / 1000))} seconds` }); }
   setModels(models: string[]): void {
     const highlighted = this.modelPicker ? this.filteredModels()[this.modelPicker.index] : undefined;
     this.availableModels = models;
@@ -434,13 +439,17 @@ export class AppView {
     } else if (block.kind === "assistant") {
       renderMarkdown(text, THEME, width - 2).forEach((line, i) => rows.push({ segments: [seg(i === 0 ? "● " : "  ", THEME.primary), ...line] }));
     } else if (block.kind === "thinking") {
-      rows.push({ segments: [seg(`◌ 思考${this.showDetails ? "" : " · Ctrl+O 展开"}`, THEME.thinking)] });
+      const storedDuration = block.meta?.status?.startsWith("duration:") ? Number(block.meta.status.slice(9)) : this.thinkingElapsed;
+      const seconds = storedDuration ? Math.max(1, Math.round(storedDuration / 1000)) : undefined;
+      rows.push({ segments: [seg(`* Thought${seconds ? ` for ${seconds} second${seconds === 1 ? "" : "s"}` : ""}`, THEME.thinking), seg(this.showDetails ? "" : "  [ctrl+o to expand]", THEME.textMuted)] });
       if (this.showDetails) plain(text, THEME.thinking);
     } else if (block.kind === "tool") {
       const status = block.meta?.status ?? "running";
       const color = status === "error" ? THEME.error : status === "done" ? THEME.success : THEME.warning;
       const mark = status === "running" ? "◌" : status === "error" ? "×" : status === "cancelled" ? "–" : "✓";
-      rows.push({ segments: [seg(`${mark} ${stripAnsi(block.meta?.name ?? "工具")}`, color, true), seg(status === "running" ? "  执行中" : status === "cancelled" ? "  已停止" : "", THEME.textMuted)] });
+      const toolName = stripAnsi(block.meta?.name ?? "工具");
+      const badge = /skill/i.test(toolName) ? "SKILL" : /read|cat|view/i.test(toolName) ? "READ" : /shell|bash|command|terminal/i.test(toolName) ? "SHELL" : /write|edit|patch/i.test(toolName) ? "WRITE" : /search|grep|find/i.test(toolName) ? "SEARCH" : toolName.toUpperCase().slice(0, 10);
+      rows.push({ segments: [{ text: ` ${badge} `, style: makeStyle({ fg: THEME.text, bg: THEME.secondary, bold: true }) }, seg(`  ${status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : status === "error" ? "Failed" : "Done"}`, color)] });
       if (block.meta?.input) plain(stripAnsi(block.meta.input), THEME.textMuted, 2, this.showDetails ? Infinity : 1);
       if (text) plain(text, status === "error" ? THEME.error : THEME.textMuted, 2, this.showDetails ? Infinity : 3);
     } else if (block.kind === "usage") {
@@ -482,12 +491,12 @@ export class AppView {
     this.maxScroll = Math.max(0, transcript.length - this.transcriptH);
     this.scroll = this.atBottom ? this.maxScroll : Math.min(this.scroll, this.maxScroll);
     if (transcript.length === 0) {
+      const logo = ["██████╗  █████╗ ██████╗  ██████╗ ██████╗", "██╔══██╗██╔══██╗██╔══██╗██╔═══██╗██╔══██╗", "██████╔╝███████║██████╔╝██║   ██║██████╔╝", "██╔══██╗██╔══██║██╔══██╗██║   ██║██╔══██╗", "██████╔╝██║  ██║██████╔╝╚██████╔╝██║  ██║"];
       const welcome: [string, string, boolean?][] = [
-        ["", THEME.text], ["准备好一起做点什么？", THEME.text, true],
-        ["选择模型，开始对话。你的任务会随模型切换继续。", THEME.textMuted], ["", THEME.text],
-        ["F2 或 /model      使用本地客户端，或选择已添加的模型", THEME.accent], ["F3 或 /providers  添加官方 API / 自定义提供商", THEME.accent], ["/help            查看命令与快捷键", THEME.textMuted],
-        ["试试：解释这个项目的结构，找出可以改进的地方", THEME.textMuted], ["", THEME.text],
-        [this.availableModels.length ? `${this.availableModels.length} 个模型可用 · ${this.availableModels.slice(0, 3).join(" / ")}` : "正在检查本机可用模型…", THEME.textMuted]
+        ...logo.map(line => [line, THEME.secondary, true] as [string, string, boolean]), ["", THEME.text],
+        [`# habor v${this.opts.version}`, THEME.text, true], [`# model: ${this.model ?? "未选择 · F2 选择模型"} · ${reasoningLabel(this.reasoningEffort)}`, THEME.textMuted], [`# ${this.opts.cwd ?? process.cwd()}`, THEME.textMuted], ["", THEME.text],
+        ["READY", THEME.info, true], ["  选择模型后开始对话；首次进入目录会请求工作区信任。", THEME.textMuted], ["", THEME.text],
+        ["F2 选择模型 · F3 配置来源 · F4 思考 · F5 Agent", THEME.accent], ["/help 查看快捷键与命令", THEME.textMuted]
       ];
       welcome.slice(0, this.transcriptH).forEach(([text, fg, bold], i) => write(transcriptTop + i, text, fg, left + 2, width - 4, undefined, bold));
     } else {
@@ -525,7 +534,7 @@ export class AppView {
     for (let i = 0; i < inputH; i++) {
       const line = inputLines[inputStart + i];
       write(composerTop + 1 + i, i === 0 ? "❯" : "·", THEME.primary, left + 1, 1);
-      write(composerTop + 1 + i, line?.text || (i === 0 && !this.input ? (this.status === "running" ? "可以继续写下一条消息…" : this.model ? "输入消息，或 / 查看命令" : "输入 /model 选择模型") : ""), this.input ? THEME.text : THEME.textMuted, left + 3, width - 4);
+      write(composerTop + 1 + i, line?.text || (i === 0 && !this.input ? (this.status === "running" ? "可以继续写下一条消息…" : "Ask your question...  ( / for commands )") : ""), this.input ? THEME.text : THEME.textMuted, left + 3, width - 4);
     }
     write(composerTop + inputH + 1, "─".repeat(width), THEME.border);
     const running = this.status === "running";

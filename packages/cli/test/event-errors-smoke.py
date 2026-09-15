@@ -1,5 +1,6 @@
 """Replay structured errors through the real ZCode adapter and CLI in a POSIX TTY."""
 import fcntl
+import json
 import os
 from pathlib import Path
 import pty
@@ -35,11 +36,14 @@ with tempfile.TemporaryDirectory(prefix='habor-event-replay-') as work:
     state = Path(work, 'state')
     state.mkdir()
     (state / 'state.jsonl').write_text('')
+    (state / 'trust.json').write_text(json.dumps({'version': 1, 'paths': [str(Path(work).resolve())]}))
     proc = subprocess.Popen(['node', str(root / 'packages/cli/dist/index.js')], cwd=work,
                             stdin=slave, stdout=slave, stderr=slave,
                             env={**os.environ, 'TERM': 'xterm-256color', 'HABOR_STATE_DIR': str(state),
                                  'ZCODE_CLI': str(root / 'packages/cli/test/fixtures/zcode-errors.cjs')})
     try:
+        read_until('Ask your question'.encode())
+        os.write(master, b'\x1bOQ')
         read_until('个模型 ·'.encode())
         os.write(master, b'\x1b[B\x1b[B\r')  # select GLM in the real startup picker
         read_until('已选择 GLM-5.3'.encode())

@@ -128,6 +128,7 @@ export class TuiController {
   }
   endTurn(): void {
     this.view.setBusy(false);
+    this.view.addTurnSummary();
     this.view.setStatusText("");
   }
   /** 在输入框提示一条临时消息（模型连接成功等） */

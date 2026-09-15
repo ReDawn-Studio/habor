@@ -42,6 +42,7 @@ with tempfile.TemporaryDirectory(prefix='habor-login-') as work:
     state = Path(work, 'state')
     state.mkdir()
     (state / 'state.jsonl').write_text('')
+    (state / 'trust.json').write_text(json.dumps({'version': 1, 'paths': [str(Path(work).resolve())]}))
     binary, auth = Path(work, 'codex-auth.cjs'), Path(work, 'auth-marker')
     binary.write_text(fixture)
     binary.chmod(0o755)
@@ -72,8 +73,7 @@ with tempfile.TemporaryDirectory(prefix='habor-login-') as work:
         assert text.encode() in captured[since:], f'Missing {text!r}; exit={proc.poll()}'
 
     try:
-        wait('个模型 ·')
-        send('\x1b')
+        wait('Ask your question')
         time.sleep(0.06)
         send('\x1b[200~draft before authorization\x1b[201~')
         send('\x1b[15~')  # F5

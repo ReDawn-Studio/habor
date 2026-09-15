@@ -41,6 +41,7 @@ with tempfile.TemporaryDirectory(prefix='habor-no-agents-') as work:
     state.mkdir()
     bin_dir.mkdir()
     (state / 'state.jsonl').write_text('')
+    (state / 'trust.json').write_text(json.dumps({'version': 1, 'paths': [str(Path(work).resolve())]}))
     os.symlink(node, bin_dir / 'node')
     os.symlink('/bin/sh', bin_dir / 'sh')
     codex, request_file = bin_dir / 'codex-fixture', Path(work, 'request.json')
@@ -74,6 +75,7 @@ with tempfile.TemporaryDirectory(prefix='habor-no-agents-') as work:
         wait_for(lambda: text.encode() in captured[since:])
 
     try:
+        send('\x1bOQ')
         wait_text('未检测到 Agent。')
         wait_text('待安装')
         send('\r')
@@ -101,7 +103,7 @@ with tempfile.TemporaryDirectory(prefix='habor-no-agents-') as work:
         assert not request_file.exists()
 
         send('\x1b[B\r')  # retry before installation: stays in setup
-        wait_text('Codex CLI。安装说明')
+        wait_text('未检测到 Codex CLI')
         assert not request_file.exists()
         codex.write_text(fixture)
         codex.chmod(0o755)

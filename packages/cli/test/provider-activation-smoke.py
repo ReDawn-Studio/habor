@@ -146,6 +146,7 @@ try:
         state, dsh = Path(work, 'state'), Path(work, 'dsh')
         state.mkdir()
         dsh.mkdir()
+        (state / 'trust.json').write_text(json.dumps({'version': 1, 'paths': [str(Path(work).resolve())]}))
         (state / 'state.jsonl').write_text('')
         (dsh / 'settings.yaml').write_text(json.dumps({
             'agent-default-model': {'provider': 'deepseek', 'model': 'deepseek-v4-flash'},
@@ -156,6 +157,8 @@ try:
         os.chmod(dsh / '.credentials.yaml', 0o600)
         terminal = Terminal(work, state, dsh)
         try:
+            terminal.wait('Ask your question')
+            terminal.send('\x1bOQ')
             terminal.wait('个模型 ·')
             terminal.send('\r')
             terminal.wait('已选择 DeepSeek V4 Flash')

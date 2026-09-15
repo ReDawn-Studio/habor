@@ -1,5 +1,13 @@
 # 更新日志
 
+## v0.5.3 — 2026-09-16
+
+- 首屏改为品牌 Logo、版本、模型状态、工作目录、Ready 状态和 `Ask your question...` 输入区。
+- 思考显示为可折叠的耗时行，工具调用显示 `SKILL`、`READ`、`SHELL`、`WRITE` 等标签，回复完成后显示耗时。
+- 默认不启用鼠标上报，恢复终端原生拖选和 Cmd+C 复制；滚轮接管改为 `HABOR_MOUSE_SCROLL=1`。
+- 增加工作区信任确认：首次选择模型前询问目录是否可信，记录到 `~/.habor/trust.json`。
+- 核实并加入 Grok Build 官方 CLI 的原生终端管理入口。
+
 ## v0.5.2 — 2026-09-16
 
 - 默认关闭鼠标上报，恢复 macOS Terminal / iTerm 的原生拖选和复制；滚轮接管改为 `HABOR_MOUSE_SCROLL=1` 可选项。
