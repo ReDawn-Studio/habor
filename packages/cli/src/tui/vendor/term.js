@@ -372,10 +372,11 @@ export class Terminal extends EventEmitter {
     }
     this.input.on('data', this._onData)
     this.output.on('resize', this._onResize)
-    // Alternate screen, disable wrapping at the lower-right cell, enable wheel tracking and
-    // bracketed paste so pasted payloads (including binary images) arrive as
-    // one delimited event instead of scattered printable bytes.
-    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l\x1b[?1000h\x1b[?1006h\x1b[?2004h\x1b[2J\x1b[H')
+    // Keep mouse reporting off by default so macOS Terminal/iTerm can perform
+    // native drag selection and Cmd+C. Set HABOR_MOUSE_SCROLL=1 to let habor
+    // receive wheel events instead.
+    const mouse = process.env.HABOR_MOUSE_SCROLL === '1' ? '\x1b[?1000h\x1b[?1006h' : ''
+    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l' + mouse + '\x1b[?2004h\x1b[2J\x1b[H')
     this.raw = true
   }
 

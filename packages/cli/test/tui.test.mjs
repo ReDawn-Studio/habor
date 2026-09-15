@@ -215,6 +215,22 @@ test('a stopped terminal cannot redraw over the restored shell', () => {
   assert.ok(output.endsWith('\x1b[?1049l'));
 });
 
+test('mouse reporting is opt-in so the terminal keeps native drag selection and copy', () => {
+  let output = '';
+  const input = { isTTY: true, setRawMode() {}, resume() {}, pause() {}, on() {}, off() {} };
+  const target = { columns: 80, rows: 24, write(text) { output += text; }, on() {}, off() {} };
+  const previous = process.env.HABOR_MOUSE_SCROLL;
+  delete process.env.HABOR_MOUSE_SCROLL;
+  try {
+    const terminal = new Terminal({ input, output: target }); terminal.start();
+    assert.doesNotMatch(output, /\?1000h|\?1006h/); terminal.stop();
+    output = '';
+    process.env.HABOR_MOUSE_SCROLL = '1';
+    const scrolling = new Terminal({ input, output: target }); scrolling.start();
+    assert.match(output, /\?1000h/); assert.match(output, /\?1006h/); scrolling.stop();
+  } finally { if (previous === undefined) delete process.env.HABOR_MOUSE_SCROLL; else process.env.HABOR_MOUSE_SCROLL = previous; }
+});
+
 test('markdown emphasis survives default style values and code spans', () => {
   const lines = renderMarkdown('**important `code`** and *thought*', THEME, 76);
   const segments = lines.flat();

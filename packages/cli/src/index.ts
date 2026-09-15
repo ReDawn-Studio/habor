@@ -30,7 +30,7 @@ import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus 
 import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 
-const VERSION = "0.5.0";
+const VERSION = "0.5.1";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -152,14 +152,14 @@ const HELP = `habor — 原生 Agent 聚合平台
   ←→ / Home / End       移动输入光标
   Alt+Enter / Ctrl+J     换行（支持的终端也可用 Shift+Enter）
   ↑↓                    历史输入 / 多行移动
-  PgUp / PgDn / 滚轮     浏览对话；Esc 回到底部
+  PgUp / PgDn             浏览对话；Esc 回到底部
   Ctrl+O                展开或折叠思考与工具输出
   Ctrl+Y                复制最近一段回复
   Ctrl+L                清空屏幕
   Esc / Ctrl+C          停止当前回复，保留会话界面
   Ctrl+C                清空草稿；空草稿下连按两次退出
 运行时可以继续编辑草稿，结束后按 Enter 发送。
-鼠标选择文字可按住 Shift（取决于终端设置）。`;
+默认由终端处理鼠标拖选和复制；HABOR_MOUSE_SCROLL=1 时 habor 接管滚轮，使用终端支持的 Shift / Option 拖选。`;
 
 // —— 模型选择 ——
 
