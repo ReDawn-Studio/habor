@@ -29,8 +29,9 @@ import { AgentInstaller } from "./agent-installer.js";
 import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus } from "./agent-auth.js";
 import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
+import { WorkspaceTrust } from "./workspace-trust.js";
 
-const VERSION = "0.5.1";
+const VERSION = "0.5.2";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -57,6 +58,7 @@ if (!existsSync(stateFile)) {
 }
 
 const providers = new ProviderStore(stateDir);
+const workspaceTrust = new WorkspaceTrust(stateDir);
 const agentInstaller = new AgentInstaller(stateDir);
 const lifecycleShutdown = new AbortController();
 let lifecycleWork: Promise<unknown> | undefined;
@@ -132,6 +134,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   /providers            本地客户端 / 官方 API / 自定义提供商配置
   /agents               管理 Agent：自动安装、原生登录或 API Key
   /login                管理当前 Agent 的认证
+  /trust                查看并确认当前工作区信任
   /refresh              重新检测已安装的 Agent
   /effort [档位]        当前模型的思考强度；无参数时打开选择器
   /tasks                列出任务（绑定链）
@@ -255,6 +258,7 @@ function resolveModelArg(arg: string, available: string[]): string | undefined {
 }
 
 async function selectModel(model: string): Promise<void> {
+  if (!workspaceTrust.isTrusted(cwd)) throw new Error("当前工作区尚未信任，请在交互终端选择“是，继续”，或运行 /trust");
   const external = EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
   if (external) {
     if (!executableOnPath(agentExecutable(external.adapterId))) throw new Error(missingAgentMessage(external.adapterId));
@@ -332,6 +336,10 @@ async function handleCommand(line: string): Promise<boolean> {
       if (tui) { if (cmd === "/login") tui.view.openLogin(); else tui.view.openAgents(); }
       else out("请在交互终端运行 habor，按 F5 管理 Agent 的安装与认证。");
       return true;
+    case "/trust":
+      if (tui) tui.view.openWorkspaceTrust();
+      else out(workspaceTrust.isTrusted(cwd) ? "当前工作区已信任。" : "非交互终端无法确认工作区信任，请在 TTY 中运行 habor。");
+      return true;
     case "/effort": {
       if (!arg && tui) { void tui.view.openReasoning(); return true; }
       const capabilities = await currentReasoning();
@@ -381,8 +389,11 @@ async function handleCommand(line: string): Promise<boolean> {
       } else {
         const models = registry.listModels().map(entry => entry.model);
         const resolved = resolveModelArg(arg, models);
-        if (resolved) await selectModel(resolved);
-        else out(C.yellow(`「${arg}」未能唯一匹配。请用 /models 查看模型与安装状态。`));
+        if (resolved) {
+          // 首次进入未信任目录时先确认信任，确认后沿用同一个待选模型。
+          if (tui && !workspaceTrust.isTrusted(cwd)) tui.view.openWorkspaceTrust(resolved);
+          else await selectModel(resolved);
+        } else out(C.yellow(`「${arg}」未能唯一匹配。请用 /models 查看模型与安装状态。`));
       }
       return true;
     case "/clear":
@@ -619,6 +630,9 @@ async function main(): Promise<void> {
       onInstallAgent: installAgent,
       onLoginAgent: loginAgent,
       onInspectAgentAuth: async model => nativeAuthStatus((registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model))?.adapterId ?? "", cwd),
+      onCheckWorkspaceTrust: () => workspaceTrust.isTrusted(cwd),
+      onTrustWorkspace: async () => { workspaceTrust.trust(cwd); out("✓ 已信任当前工作区"); },
+      onWorkspaceTrustDenied: () => { void bye(); },
       onOpenAgentDocs: async model => {
         const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
         if (!entry) throw new Error("模型配置已变更，请重新选择");
@@ -640,7 +654,8 @@ async function main(): Promise<void> {
     process.once("SIGHUP", bye);
     await refreshConnections();
     const preferred = providers.preferredModel(registry.listModels().filter(entry => availableModels!.includes(entry.model)));
-    if (preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker && !tui.view.agentSetupPanel) {
+    // 未信任目录不自动恢复连接：信任确认在用户选择模型时弹出。
+    if (workspaceTrust.isTrusted(cwd) && preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker && !tui.view.agentSetupPanel) {
       try { await selectModel(preferred.model); }
       catch (error) { out(`恢复上次连接失败：${error instanceof Error ? error.message : String(error)} · 按 F2 重新选择`); }
     }

@@ -8,6 +8,7 @@ export const AGENT_RUNTIMES: Record<string, { command: string; package?: string;
   "kimi-acp": { command: "kimi", package: "@moonshot-ai/kimi-code", override: "HABOR_KIMI_BIN" },
   "gemini-cli": { command: "gemini", package: "@google/gemini-cli", override: "HABOR_GEMINI_BIN" },
   "qwen-cli": { command: "qwen", package: "@qwen-code/qwen-code", override: "HABOR_QWEN_BIN" },
+  "grok-cli": { command: "grok", override: "HABOR_GROK_BIN" },
   "dsh-acp": { command: "dsh", package: "@deepseek-ai/dsh", compatibleVersion: "0.1.0-rc.8", legacyPeerDeps: true, override: "HABOR_DSH_BIN" }
 };
 export function haborStateDir(): string { return process.env.HABOR_STATE_DIR ?? join(homedir(), ".habor"); }

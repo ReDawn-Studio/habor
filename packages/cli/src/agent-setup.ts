@@ -9,12 +9,14 @@ export const AGENT_SETUP: Record<string, { name: string; url: string; detection:
   "dsh-acp": { name: "DeepSeek Harness", url: "https://github.com/deepseek-ai/deepseek-harness", detection: "需安装 @deepseek-ai/dsh 并使 dsh 命令位于 PATH。" },
   "gemini-cli": { name: "Gemini CLI", url: "https://geminicli.com/docs/get-started/authentication/", detection: "官方 CLI 原生终端模式；使用 /auth 选择 Google 登录、API Key 或 Vertex AI。" },
   "qwen-cli": { name: "Qwen Code", url: "https://qwenlm.github.io/qwen-code-docs/en/users/configuration/auth/", detection: "官方 CLI 原生终端模式；使用 /auth 配置 ModelStudio、Coding Plan 或自定义 Key。" },
+  "grok-cli": { name: "Grok Build", url: "https://docs.x.ai/build/overview", detection: "官方 shell 安装器会安装 grok；原生终端中完成浏览器登录或使用 XAI_API_KEY。" },
   zcode: { name: "ZCode", url: "https://zcode.z.ai/cn/docs/install", detection: "macOS 检测 Applications 中的 ZCode；其他路径用 ZCODE_CLI 指向 zcode.cjs。" }
 };
 
 export const EXTERNAL_AGENT_TARGETS = [
   { model: "Gemini CLI · 原生终端", modelId: "gemini-3.8-flash", adapterId: "gemini-cli", vendor: "Google" },
-  { model: "Qwen Code · 原生终端", modelId: "qwen3.8-max-0902", adapterId: "qwen-cli", vendor: "Qwen" }
+  { model: "Qwen Code · 原生终端", modelId: "qwen3.8-max-0902", adapterId: "qwen-cli", vendor: "Qwen" },
+  { model: "Grok Build · 原生终端", modelId: "grok-4.6", adapterId: "grok-cli", vendor: "xAI" }
 ];
 
 export async function openAgentInstallPage(adapterId: string): Promise<void> {

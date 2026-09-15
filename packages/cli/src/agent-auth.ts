@@ -13,6 +13,7 @@ export const AUTH_ACTIONS: Record<string, AuthAction[]> = {
   "kimi-acp": [{ id: "device", label: "使用 Kimi 账号 / 设备码登录", description: "通过 Kimi Code 原生设备码授权，保留原生凭据自动刷新。" }],
   "gemini-cli": [{ id: "native", label: "打开 Gemini 原生认证 /auth", description: "在原生界面输入 /auth，选择 Google 登录、API Key 或 Vertex AI。" }],
   "qwen-cli": [{ id: "native", label: "打开 Qwen 原生认证 /auth", description: "在原生界面输入 /auth；旧 Qwen OAuth 已停用，使用当前提供商选项。" }],
+  "grok-cli": [{ id: "native", label: "打开 Grok 原生终端认证", description: "首次启动会打开浏览器；无浏览器环境可使用 XAI_API_KEY。" }],
   "dsh-acp": [{ id: "native", label: "打开 DSH 原生配置", description: "启动 DSH Web，在 Models 页面配置；完成后 Ctrl+C 返回 habor。" }],
   zcode: [{ id: "native", label: "打开 ZCode 登录 / 配置", description: "在 ZCode 完成账号、Coding Plan 或 API Key 配置，然后返回这里。" }]
 };
@@ -24,7 +25,7 @@ export function nativeLoginCommand(id: string, method: AuthMethod, cwd: string):
     return { command: "open", args: ["-a", "ZCode"], cwd };
   }
   const args = id === "codex-acp" ? ["login", ...(method === "device" ? ["--device-auth"] : [])]
-    : id === "claude-acp" ? ["auth", "login"] : id === "kimi-acp" ? ["login"] : ["gemini-cli", "qwen-cli"].includes(id) ? [] : ["web"];
+    : id === "claude-acp" ? ["auth", "login"] : id === "kimi-acp" ? ["login"] : ["gemini-cli", "qwen-cli", "grok-cli"].includes(id) ? [] : ["web"];
   return { command: agentExecutable(id), args, cwd };
 }
 

@@ -7,6 +7,7 @@ import { renderMarkdown } from "./vendor/markdown.js";
 import { InputEditor } from "./editor.js";
 import { ProviderPanel } from "./provider-panel.js";
 import { AgentSetupPanel } from "./agent-setup-panel.js";
+import { WorkspaceTrustPanel } from "./trust-panel.js";
 import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 
 export const THEME = {
@@ -20,7 +21,7 @@ export const THEME = {
 };
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const COMMAND_HINTS: Record<string, string> = {
-  "/agents": "安装与管理 Agent", "/login": "账号登录或配置 API Key",
+  "/agents": "安装与管理 Agent", "/login": "账号登录或配置 API Key", "/trust": "信任当前工作区",
   "/model": "选择或切换模型", "/models": "选择或切换模型", "/new": "开始新任务",
   "/status": "查看当前任务", "/tasks": "查看任务记录", "/permission": "设置权限模式",
   "/help": "命令与快捷键", "/providers": "配置官方 / 自定义 API", "/refresh": "重新检测已安装的 Agent", "/effort": "当前模型的思考强度", "/clear": "清空当前屏幕", "/quit": "退出 habor", "/exit": "退出 habor"
@@ -49,6 +50,9 @@ export interface AppViewOptions {
   onInstallAgent?: (model: string, onOutput: (line: string) => void, signal: AbortSignal) => Promise<string>;
   onLoginAgent?: (model: string, method: AuthMethod) => Promise<AuthStatus>;
   onInspectAgentAuth?: (model: string) => Promise<AuthStatus>;
+  onCheckWorkspaceTrust?: () => Promise<boolean> | boolean;
+  onTrustWorkspace?: () => Promise<void>;
+  onWorkspaceTrustDenied?: () => void;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   onCancelInput?: () => void;
@@ -75,6 +79,8 @@ export class AppView {
   providers: ProviderProfile[] = [];
   modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean }> = {};
   agentSetupPanel: AgentSetupPanel | null = null;
+  trustPanel: WorkspaceTrustPanel | null = null;
+  private pendingTrustModel: string | undefined;
   providerPanel: ProviderPanel | null = null;
   reasoningEffort?: string;
   reasoningByModel: Record<string, string | undefined> = {};
@@ -129,6 +135,22 @@ export class AppView {
     if (this.modelPicker) { this.modelPicker.manage = true; this.modelPicker.query = ""; this.modelPicker.index = 0; this.paint(); }
   }
   openLogin(): void { if (this.model) this.openAgentSetup(this.model); else this.openAgents(); }
+  openWorkspaceTrust(model?: string): void {
+    if (this.trustPanel) return;
+    this.modelPicker = null; this.pendingTrustModel = model;
+    this.trustPanel = new WorkspaceTrustPanel(this.opts.cwd ?? process.cwd(), async () => {
+      await this.opts.onTrustWorkspace?.();
+      const pending = this.pendingTrustModel; this.pendingTrustModel = undefined; this.trustPanel = null;
+      if (pending && this.opts.onSelectModel) {
+        try { await this.opts.onSelectModel(pending); } catch (error) { this.notify(error instanceof Error ? error.message : String(error)); this.openModels(); }
+      } else this.paint();
+    }, () => { this.trustPanel = null; this.opts.onWorkspaceTrustDenied?.(); }, () => {
+      const hadPending = this.pendingTrustModel !== undefined;
+      this.trustPanel = null; this.pendingTrustModel = undefined;
+      if (hadPending) this.openModels(); else this.paint();
+    }, () => this.paint());
+    this.paint();
+  }
 
   async openReasoning(): Promise<void> {
     if (this.reasoningPicker) return;
@@ -228,6 +250,7 @@ export class AppView {
     if (model === this.model) { this.modelPicker = null; this.paint(); return; }
     picker.connecting = true; picker.error = ""; this.paint();
     try {
+      if (this.opts.onCheckWorkspaceTrust && !(await this.opts.onCheckWorkspaceTrust())) { this.openWorkspaceTrust(model); picker.connecting = false; return; }
       if (this.opts.onSelectModel) await this.opts.onSelectModel(model);
       else await this.opts.onInput(`/model ${model}`);
       this.modelPicker = null;
@@ -286,6 +309,7 @@ export class AppView {
   }
   handleKey(key: Key): boolean {
     const k = key.name;
+    if (this.trustPanel) { this.trustPanel.handle(key); return true; }
     if (this.agentSetupPanel) { this.agentSetupPanel.handle(key); return true; }
     if (this.reasoningPicker) return this.handleReasoningKey(key);
     if (this.providerPanel) { this.providerPanel.handle(key); return true; }
@@ -516,7 +540,7 @@ export class AppView {
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;
     if (this.modelPicker) this.paintModelPicker(screen);
-    if (this.providerPanel || this.agentSetupPanel) this.paintProviderPanel(screen);
+    if (this.providerPanel || this.agentSetupPanel || this.trustPanel) this.paintProviderPanel(screen);
     if (this.reasoningPicker) this.paintReasoningPicker(screen);
     screen.defaultBackground(THEME.background);
     this.opts.terminal.paint(screen);
@@ -588,7 +612,7 @@ export class AppView {
   }
 
   private paintProviderPanel(screen: Screen): void {
-    const panel = (this.agentSetupPanel ?? this.providerPanel)!;
+    const panel = (this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
     const content = panel.rows().map(row => ({ ...row, text: stripAnsi(row.text).replace(/[\r\n\t]+/g, " · ") }));
     const width = Math.min(86, screen.cols - 4), height = Math.min(screen.rows - 2, content.length + 4);
     const left = Math.floor((screen.cols - width) / 2), top = Math.floor((screen.rows - height) / 2);

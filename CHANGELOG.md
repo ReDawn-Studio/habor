@@ -1,5 +1,12 @@
 # 更新日志
 
+## v0.5.2 — 2026-09-16
+
+- 默认关闭鼠标上报，恢复 macOS Terminal / iTerm 的原生拖选和复制；滚轮接管改为 `HABOR_MOUSE_SCROLL=1` 可选项。
+- 首次选择模型进入工作区时增加“Do you trust the files in this folder?”确认。
+- 信任按规范化工作区路径保存到 `~/.habor/trust.json`；拒绝时退出，确认后才创建 Agent 任务。
+- 补充 Grok Build 官方 CLI、安装入口、浏览器/API Key 认证说明和原生独立终端管理。
+
 ## v0.5.1 — 2026-09-16
 
 - 默认关闭终端鼠标上报，恢复 macOS Terminal / iTerm 的原生拖选与 Cmd+C 复制。

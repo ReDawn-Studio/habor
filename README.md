@@ -63,6 +63,9 @@ F2 打开面板时会保留原有草稿和光标位置。
 默认由终端处理鼠标拖选和复制：直接拖动选择后使用终端的 Cmd+C / Ctrl+Shift+C。
 需要 habor 接管滚轮时设置 `HABOR_MOUSE_SCROLL=1`；此模式下按住终端支持的 Shift / Option 再拖动选择。
 
+首次选择模型进入一个未信任的目录时，会显示工作区信任确认。选择“是，继续”后才会创建 Agent 任务；选择“否，退出”会退出 habor。
+确认记录保存在 `~/.habor/trust.json`，按工作区目录分别保存；也可以使用 `/trust` 再次打开确认面板。
+
 输入或输出不是 TTY、或 `TERM=dumb` 时回退到原有日志模式。
 `HABOR_STATE_DIR` 可指定独立的状态目录，默认仍为 `~/.habor`。
 
@@ -137,7 +140,7 @@ F2 保留所有已配置的模型，未检测到客户端时显示“待安装�
 
 **F5 / `/agents`** 管理 Agent，**`/login`** 管理当前 Agent 的认证：
 
-- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code。使用官方 npm 包和 npmjs.org 源；安装前显示包名与本机目标目录。
+- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code；Grok Build 使用官方 shell 安装入口并提供原生终端管理。使用官方来源；安装前显示动作与目标目录。
 - Codex / Claude / Kimi 使用官方 npm `latest`；DSH 自建桥接固定在已验证的 `0.1.0-rc.8`。实测 `0.1.5-rc.1` 虽可安装，但现有桥接无法完成 ACP 连接，因此暂不启用。Agent 程序版本和模型版本独立，兼容版本仍可调用 V4.1 Flash。
 - DSH 显式安装已验证的 peer 依赖集合，再使用 `--legacy-peer-deps` 避开 npm 的循环 peer 解析；并非只跳过所需依赖。
 - 包下载到 `~/.habor/agents/<adapter>/versions/<installation-id>`，通过包标识与可执行文件版本检查后，原子更新 `active.json`。失败或取消不会切换到半安装版本；旧版本留存。

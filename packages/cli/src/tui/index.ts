@@ -22,6 +22,10 @@ export interface TuiControllerOptions {
   onInstallAgent?: (model: string, onOutput: (line: string) => void, signal: AbortSignal) => Promise<string>;
   onLoginAgent?: (model: string, method: AuthMethod) => Promise<AuthStatus>;
   onInspectAgentAuth?: (model: string) => Promise<AuthStatus>;
+  /** 工作区信任：选择模型前确认当前目录可信 */
+  onCheckWorkspaceTrust?: () => Promise<boolean> | boolean;
+  onTrustWorkspace?: () => Promise<void>;
+  onWorkspaceTrustDenied?: () => void;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   /** Ctrl-C / Esc */
@@ -50,6 +54,9 @@ export class TuiController {
       onInstallAgent: opts.onInstallAgent,
       onLoginAgent: opts.onLoginAgent,
       onInspectAgentAuth: opts.onInspectAgentAuth,
+      onCheckWorkspaceTrust: opts.onCheckWorkspaceTrust,
+      onTrustWorkspace: opts.onTrustWorkspace,
+      onWorkspaceTrustDenied: opts.onWorkspaceTrustDenied,
       onGetReasoning: opts.onGetReasoning,
       onSetReasoning: opts.onSetReasoning,
       onCancelInput: opts.onInterrupt,

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { AppView } from '../dist/tui/app.js';
 import { ZcodeStreamAdapter } from '../../adapters/dist/zcode-stream.js';
 import { createRouter } from '../../router/dist/index.js';
+import { WorkspaceTrust } from '../dist/workspace-trust.js';
 
 test('missing native agent stays visible; setup retry preserves draft, handles failure and activates only after detection', async () => {
   let installed = false, opened = 0, frame;
@@ -61,4 +62,18 @@ test('rechecking ZCode detects a newly installed or removed explicit path in the
     writeFileSync(path,'// isolated test fixture');assert.equal(await adapter.isAvailable(),true);
     rmSync(path);assert.equal(await adapter.isAvailable(),false);
   } finally {if(previous===undefined)delete process.env.ZCODE_CLI;else process.env.ZCODE_CLI=previous;rmSync(dir,{recursive:true,force:true})}
+});
+
+test('workspace trust is explicit, persists by canonical directory, and gates model selection', async () => {
+  const dir=mkdtempSync(join(tmpdir(),'habor-trust-'));
+  try {
+    const trust=new WorkspaceTrust(dir);assert.equal(trust.isTrusted('/tmp'),false);trust.trust('/tmp');assert.equal(new WorkspaceTrust(dir).isTrusted('/tmp'),true);
+    let chosen=0, denied=0, frame;
+    const view=new AppView({terminal:{cols:100,rows:30,paint(screen){frame=screen}},version:'test',cwd:'/tmp',onInput(){},onCheckWorkspaceTrust:()=>false,onTrustWorkspace:async()=>{chosen++},onWorkspaceTrustDenied:()=>{denied++},onSelectModel:async()=>{chosen++}});
+    view.modelInfo['GPT-6 Astra']={source:'local',agent:'Codex',adapterId:'codex-acp',modelId:'gpt-6-astra',installed:true};view.setModels(['GPT-6 Astra']);view.openModels();view.handleKey({name:'return'});await new Promise(resolve=>setImmediate(resolve));
+    assert.ok(view.trustPanel);assert.match(frame.cells.map(row=>row.map(cell=>cell.ch).join('')).join('\n'),/Do you trust the files in this folder/);
+    view.handleKey({name:'return'});await new Promise(resolve=>setImmediate(resolve));assert.equal(chosen,2);assert.equal(view.trustPanel,null);
+    view.openModels();view.handleKey({name:'return'});assert.equal(view.trustPanel,null);
+    view.openWorkspaceTrust();view.handleKey({name:'down'});view.handleKey({name:'return'});assert.equal(denied,1);
+  } finally {rmSync(dir,{recursive:true,force:true})}
 });
