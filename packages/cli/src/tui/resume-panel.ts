@@ -1,7 +1,7 @@
 import type { Key } from './app.js';
 import type { PanelRow } from './provider-panel.js';
 
-export interface ResumeCandidate { id: string; title: string; model: string; messages: number }
+export interface ResumeCandidate { id: string; title: string; model: string; messages: number; source?: string }
 
 export class ResumePanel {
   index = 0;
@@ -15,7 +15,7 @@ export class ResumePanel {
       { text: '只显示当前工作区的历史任务。', tone: 'muted' },
       { text: '恢复后会继续原模型和上下文。', tone: 'muted' },
       { text: '' },
-      ...this.candidates.map(candidate => ({ text: `${candidate.id} · ${candidate.title} · ${candidate.model} · ${candidate.messages} 条消息`, selected: this.candidates[this.index] === candidate })),
+      ...this.candidates.map(candidate => ({ text: `[${candidate.source ?? "habor"}] ${candidate.id} · ${candidate.title} · ${candidate.model} · ${candidate.messages} 条消息`, selected: this.candidates[this.index] === candidate })),
       { text: '' },
       { text: this.busy ? '正在恢复…' : this.error || '↑↓ 选择 · Enter 恢复 · Esc 返回', tone: this.error ? 'error' : 'muted' }
     ];

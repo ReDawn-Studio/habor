@@ -30,8 +30,9 @@ import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus 
 import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
+import { listOfficialHistories, type OfficialHistory } from "./official-history.js";
 
-const VERSION = "0.5.7";
+const VERSION = "0.5.8";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -147,6 +148,29 @@ async function resumeTask(taskId: string): Promise<void> {
   tui?.view && (tui.view.reasoningEffort = reasoningPreferences.get(registry.entry(target.model)!));
   out(C.green(`✓ 已恢复 ${resumed.id} · ${target.model} · 当前工作区上下文已加载`));
   persist();
+}
+
+async function resumeOfficialHistory(history: OfficialHistory): Promise<void> {
+  if (!workspaceTrust.isTrusted(cwd)) throw new Error("请先运行 /trust 确认当前工作区");
+  const available = await listAvailable();
+  const currentModel = currentTaskId ? router.status(currentTaskId).target?.model : undefined;
+  const preferredModel = providers.preferredModel(registry.listModels())?.model;
+  const model = [currentModel, preferredModel, ...available].find(candidate => candidate && available.includes(candidate));
+  if (!model || !available.includes(model)) throw new Error("请先选择一个当前可用模型，用它继续官方历史会话");
+  const task = await router.newTask({ model, cwd, title: `[${history.source}] ${history.title}`, permission, reasoningEffort: reasoningPreferences.get(registry.entry(model)!) });
+  const binding = task.bindings.at(-1);
+  if (binding) binding.reason = "switch";
+  for (const turn of history.turns) tasks.appendTurn(task, { role: turn.role, text: turn.text, model: `${history.source} history`, adapterId: history.source.toLowerCase().replace(/\s+/g, "-") });
+  currentTaskId = task.id; conversationMode = "resumed";
+  tui?.setTask(task.id); tui?.setModel(model); tui?.setConversation(history.turns);
+  out(C.green(`✓ 已导入 ${history.source} 历史会话 · ${history.title} · 当前使用 ${model}`));
+  persist();
+}
+
+async function resumeAnyTask(id: string): Promise<void> {
+  const official = listOfficialHistories(cwd).find(history => history.id === id);
+  if (official) return resumeOfficialHistory(official);
+  return resumeTask(id);
 }
 
 const HELP = `habor — 原生 Agent 聚合平台
@@ -427,15 +451,17 @@ async function handleCommand(line: string): Promise<boolean> {
       return true;
     case "/resume": {
       const list = tasksInCurrentWorkspace();
+      const official = listOfficialHistories(cwd);
       if (!arg) {
-        if (tui) { tui.view.openResume(list.slice(0, 12).map(task => ({ id: task.id, title: task.title, model: task.bindings.at(-1)?.model ?? "未选择模型", messages: task.conversation.length }))); }
-        else if (!list.length) out(C.yellow("当前工作区暂无历史任务。"));
-        else { const lines = [C.bold("当前工作区历史任务（使用 /resume <任务 ID> 恢复）:")]; list.slice(0, 12).forEach((task, index) => lines.push(`  ${index + 1}. ${task.id}  ${task.title} · ${task.conversation.length} 条消息`)); out(lines.join("\n")); }
+        if (tui) { tui.view.openResume([...list.slice(0, 12).map(task => ({ id: task.id, title: task.title, model: task.bindings.at(-1)?.model ?? "未选择模型", messages: task.conversation.length, source: "habor" })), ...official.slice(0, 12).map(history => ({ id: history.id, title: history.title, model: history.model ?? "官方历史模型", messages: history.turns.length, source: history.source }))]); }
+        else if (!list.length && !official.length) out(C.yellow("当前工作区暂无历史任务。"));
+        else { const lines = [C.bold("当前工作区历史任务（使用 /resume <任务 ID> 恢复）:")]; [...list.slice(0, 12).map(task => `[habor] ${task.id}  ${task.title} · ${task.conversation.length} 条消息`), ...official.slice(0, 12).map(history => `[${history.source}] ${history.id}  ${history.title} · ${history.turns.length} 条消息`)].forEach(line => lines.push(`  ${line}`)); out(lines.join("\n")); }
         return true;
       }
-      const target = /^\d+$/.test(arg) ? list[Number(arg) - 1] : list.find(task => task.id === arg) ?? list.find(task => task.id.startsWith(arg));
+      const all = [...list.map(task => ({ id: task.id, official: false })), ...official.map(history => ({ id: history.id, official: true }))];
+      const target = /^\d+$/.test(arg) ? all[Number(arg) - 1] : all.find(item => item.id === arg) ?? all.find(item => item.id.startsWith(arg));
       if (!target) out(C.yellow("找不到当前工作区中的任务；其他目录的任务不会显示。"));
-      else await resumeTask(target.id);
+      else await resumeAnyTask(target.id);
       return true;
     }
     case "/tasks": {
@@ -685,7 +711,7 @@ async function main(): Promise<void> {
       onCheckWorkspaceTrust: () => workspaceTrust.isTrusted(cwd),
       onTrustWorkspace: async () => { workspaceTrust.trust(cwd); out("✓ 已信任当前工作区"); },
       onWorkspaceTrustDenied: () => { void bye(); },
-      onResumeTask: resumeTask,
+      onResumeTask: resumeAnyTask,
       onOpenAgentDocs: async model => {
         const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
         if (!entry) throw new Error("模型配置已变更，请重新选择");
