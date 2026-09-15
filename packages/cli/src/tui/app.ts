@@ -53,6 +53,7 @@ export interface AppViewOptions {
   onCheckWorkspaceTrust?: () => Promise<boolean> | boolean;
   onTrustWorkspace?: () => Promise<void>;
   onWorkspaceTrustDenied?: () => void;
+  onResumeTask?: (taskId: string) => Promise<void>;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   onCancelInput?: () => void;
@@ -105,6 +106,14 @@ export class AppView {
   set input(text: string) { this.editor.set(text); }
   setModel(model: string | null): void { if (this.model !== model) this.connectionSummary = ""; this.model = model; this.statusText = ""; this.paint(); }
   setTask(taskId: string | null): void { if (this.taskId !== taskId) this.connectionSummary = ""; this.taskId = taskId; this.paint(); }
+  setConversation(turns: Array<{ role: string; text: string }>): void {
+    this.blocks = turns.filter(turn => turn.text).map(turn => ({
+      kind: turn.role === "user" ? "user" : turn.role === "assistant" ? "assistant" : turn.role === "tool" ? "tool" : "system",
+      text: turn.text,
+      meta: turn.role === "tool" ? { name: "工具", status: "done" } : undefined
+    })) as Block[];
+    this.connectionSummary = ""; this.scroll = 0; this.atBottom = true; this.paint();
+  }
   setStatusText(text: string): void { this.statusText = text; this.paint(); }
   startThinking(): void { if (!this.thinkingStartedAt) { this.thinkingStartedAt = Date.now(); this.thinkingElapsed = 0; } this.paint(); }
   finishThinking(): void { if (this.thinkingStartedAt) { this.thinkingElapsed = Date.now() - this.thinkingStartedAt; this.thinkingStartedAt = 0; const block = [...this.blocks].reverse().find(item => item.kind === "thinking"); if (block) block.meta = { ...block.meta, status: `duration:${this.thinkingElapsed}` }; this.paint(); } }

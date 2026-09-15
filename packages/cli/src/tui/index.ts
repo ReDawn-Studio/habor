@@ -26,6 +26,7 @@ export interface TuiControllerOptions {
   onCheckWorkspaceTrust?: () => Promise<boolean> | boolean;
   onTrustWorkspace?: () => Promise<void>;
   onWorkspaceTrustDenied?: () => void;
+  onResumeTask?: (taskId: string) => Promise<void>;
   onGetReasoning?: () => Promise<ReasoningCapabilities>;
   onSetReasoning?: (effort: string | undefined) => Promise<void>;
   /** Ctrl-C / Esc */
@@ -57,6 +58,7 @@ export class TuiController {
       onCheckWorkspaceTrust: opts.onCheckWorkspaceTrust,
       onTrustWorkspace: opts.onTrustWorkspace,
       onWorkspaceTrustDenied: opts.onWorkspaceTrustDenied,
+      onResumeTask: opts.onResumeTask,
       onGetReasoning: opts.onGetReasoning,
       onSetReasoning: opts.onSetReasoning,
       onCancelInput: opts.onInterrupt,
@@ -111,6 +113,9 @@ export class TuiController {
   }
   setTask(taskId: string | null): void {
     this.view.setTask(taskId);
+  }
+  setConversation(turns: Array<{ role: string; text: string }>): void {
+    this.view.setConversation(turns);
   }
   setBusy(busy: boolean): void {
     this.view.setBusy(busy);

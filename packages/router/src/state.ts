@@ -142,6 +142,10 @@ export class TaskStore {
     return [...this.tasks.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
+  listTasksForCwd(cwd: string): Task[] {
+    return this.listTasks().filter(task => task.cwd === cwd);
+  }
+
   private touch(task: Task): void {
     task.updatedAt = Date.now();
   }

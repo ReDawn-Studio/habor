@@ -83,3 +83,17 @@ test('malformed adapter text is normalized before persistence and event delivery
   assert.equal(events[2].toolResult.output, 'tool error'); assert.equal(events[3].error.message, 'upstream error');
   assert.deepEqual(task.conversation.map(turn => turn.text), ['hello', 'answer continued']);
 });
+
+test('resuming a completed task reopens only its latest binding and keeps its workspace identity', async () => {
+  const { router, sessions } = harness(async function* () { yield { type: 'message', delta: 'saved answer' }; });
+  const task = await router.newTask({ model: 'DeepSeek V4 Flash', cwd: '/workspace/project' });
+  for await (const event of router.continueTask(task.id, 'save this context')) { /* consume */ }
+  await router.finishTask(task.id, 'done');
+  assert.equal(task.status, 'done');
+  const resumed = router.resumeTask(task.id);
+  assert.equal(resumed.status, 'active');
+  assert.equal(router.status(task.id).target.model, 'DeepSeek V4 Flash');
+  assert.equal(task.cwd, '/workspace/project');
+  assert.equal(task.bindings.filter(binding => binding.endedAt === undefined).length, 1);
+  assert.equal(sessions.length, 1); // Session is lazily reconstructed on the next turn.
+});

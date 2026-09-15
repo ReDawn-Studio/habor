@@ -31,7 +31,7 @@ import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
 
-const VERSION = "0.5.3";
+const VERSION = "0.5.4";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -125,6 +125,28 @@ async function bye(): Promise<void> {
   process.exit(0);
 }
 
+function tasksInCurrentWorkspace() {
+  const current = workspaceTrust.canonical(cwd);
+  return tasks.listTasks().filter(task => workspaceTrust.canonical(task.cwd) === current);
+}
+
+async function resumeTask(taskId: string): Promise<void> {
+  if (!workspaceTrust.isTrusted(cwd)) throw new Error("请先运行 /trust 确认当前工作区");
+  const candidates = tasksInCurrentWorkspace();
+  const task = candidates.find(item => item.id === taskId);
+  if (!task) throw new Error("找不到当前工作区中的任务；任务不会跨目录显示或恢复");
+  const resumed = router.resumeTask(task.id);
+  const target = router.status(resumed.id).target;
+  if (!target || !registry.entry(target.model)) throw new Error("任务绑定的模型配置已不存在，请重新选择模型");
+  const available = await listAvailable();
+  if (!available.includes(target.model)) throw new Error(`任务需要的 Agent 当前不可用：${target.model}`);
+  currentTaskId = resumed.id;
+  tui?.setTask(resumed.id); tui?.setModel(target.model); tui?.setConversation(resumed.conversation);
+  tui?.view && (tui.view.reasoningEffort = reasoningPreferences.get(registry.entry(target.model)!));
+  out(C.green(`✓ 已恢复 ${resumed.id} · ${target.model} · 当前工作区上下文已加载`));
+  persist();
+}
+
 const HELP = `habor — 原生 Agent 聚合平台
 用户只选模型；任务自动跑在对应厂商的原生 agent（harness）里。
 
@@ -137,7 +159,8 @@ const HELP = `habor — 原生 Agent 聚合平台
   /trust                查看并确认当前工作区信任
   /refresh              重新检测已安装的 Agent
   /effort [档位]        当前模型的思考强度；无参数时打开选择器
-  /tasks                列出任务（绑定链）
+  /tasks                列出当前工作区任务（绑定链）
+  /resume [任务 ID]     恢复当前工作区的历史任务
   /new                  结束当前任务，开始新任务
   /status               当前任务 + 会话绑定
   /permission <ask|auto> 权限模式
@@ -399,8 +422,20 @@ async function handleCommand(line: string): Promise<boolean> {
     case "/clear":
       if (tui) tui.view.clearMessages();
       return true;
+    case "/resume": {
+      const list = tasksInCurrentWorkspace();
+      if (!arg) {
+        if (!list.length) out(C.yellow("当前工作区暂无历史任务。"));
+        else { const lines = [C.bold("当前工作区历史任务（使用 /resume <任务 ID> 恢复）:")]; list.slice(0, 12).forEach((task, index) => lines.push(`  ${index + 1}. ${task.id}  ${task.title} · ${task.conversation.length} 条消息`)); out(lines.join("\n")); }
+        return true;
+      }
+      const target = /^\d+$/.test(arg) ? list[Number(arg) - 1] : list.find(task => task.id === arg) ?? list.find(task => task.id.startsWith(arg));
+      if (!target) out(C.yellow("找不到当前工作区中的任务；其他目录的任务不会显示。"));
+      else await resumeTask(target.id);
+      return true;
+    }
     case "/tasks": {
-      const list = router.listTasks();
+      const list = tasksInCurrentWorkspace();
       if (list.length === 0) {
         out(C.yellow("（暂无任务，用 /model 开始一个）"));
         return true;
@@ -590,7 +625,7 @@ async function runPrompt(text: string): Promise<void> {
 
 // —— Tab 补全 ——
 
-const COMMANDS = ["model", "models", "providers", "agents", "login", "refresh", "effort", "new", "status", "tasks", "permission", "clear", "help", "quit", "exit"];
+const COMMANDS = ["model", "models", "providers", "agents", "login", "trust", "refresh", "effort", "new", "status", "tasks", "resume", "permission", "clear", "help", "quit", "exit"];
 function completeLine(line: string): string[] {
   if (line.startsWith("/effort ")) {
     const model = currentTaskId ? router.status(currentTaskId).target?.model : undefined;

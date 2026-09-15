@@ -52,6 +52,18 @@ export class TaskRouter {
     return this.tasks.getTask(id);
   }
 
+  /** Reopen a persisted task without changing its latest model binding. */
+  resumeTask(taskId: string): Task {
+    const task = this.requireTask(taskId);
+    const latest = task.bindings.at(-1);
+    if (!latest) throw new Error("该任务没有可恢复的模型绑定");
+    for (const binding of task.bindings) if (binding !== latest) binding.endedAt ??= Date.now();
+    latest.endedAt = undefined;
+    task.status = "active";
+    task.updatedAt = Date.now();
+    return task;
+  }
+
   /** 新建任务：Router 首次判路由（用户选模型 → 对应原生 harness）。 */
   async newTask(opts: { model: string; cwd: string; title?: string; permission?: "ask" | "auto"; reasoningEffort?: string }): Promise<Task> {
     const task = this.tasks.createTask({
