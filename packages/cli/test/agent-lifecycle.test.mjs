@@ -9,7 +9,6 @@ import {managedAgentExecutable,agentExecutable} from '../../core/dist/index.js';
 import {AppView} from '../dist/tui/app.js';
 import {Terminal,Screen} from '../dist/tui/vendor/term.js';
 import {nativeLoginCommand,nativeAuthStatus} from '../dist/agent-auth.js';
-import {isCasualGreeting} from '../dist/prompt-intent.js';
 
 function materialize(stage,version='1.2.3'){
   const dir=join(stage,'node_modules','@openai','codex');mkdirSync(dir,{recursive:true});
@@ -42,9 +41,6 @@ test('managed installation verifies a staged official package and keeps the work
   }finally{rmSync(dir,{recursive:true,force:true})}
 });
 
-test('standalone greetings are identified for fresh-task isolation without matching real requests',()=>{
-  assert.equal(isCasualGreeting('你好'),true);assert.equal(isCasualGreeting(' hello!!! '),true);assert.equal(isCasualGreeting('你好，帮我检查这个项目'),false);assert.equal(isCasualGreeting('hello world'),false);
-});
 
 test('cancelled installation cannot activate a package and releases the installation lock',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'habor-install-cancel-')),controller=new AbortController();

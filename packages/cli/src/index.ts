@@ -30,9 +30,8 @@ import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus 
 import { runAgentCommand } from "./agent-process.js";
 import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
-import { isCasualGreeting } from "./prompt-intent.js";
 
-const VERSION = "0.5.5";
+const VERSION = "0.5.6";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -79,6 +78,7 @@ if (existsSync(stateFile)) {
 const cwd = process.cwd();
 let permission: "ask" | "auto" = "auto";
 let currentTaskId: string | null = null;
+let conversationMode: "fresh" | "resumed" = "fresh";
 let quitRequested = false;
 
 // —— 界面层（TTY = 全屏 TUI；非 TTY = 日志输出）——
@@ -142,6 +142,7 @@ async function resumeTask(taskId: string): Promise<void> {
   const available = await listAvailable();
   if (!available.includes(target.model)) throw new Error(`任务需要的 Agent 当前不可用：${target.model}`);
   currentTaskId = resumed.id;
+  conversationMode = "resumed";
   tui?.setTask(resumed.id); tui?.setModel(target.model); tui?.setConversation(resumed.conversation);
   tui?.view && (tui.view.reasoningEffort = reasoningPreferences.get(registry.entry(target.model)!));
   out(C.green(`✓ 已恢复 ${resumed.id} · ${target.model} · 当前工作区上下文已加载`));
@@ -168,7 +169,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   /clear                清空屏幕（保留任务和对话）
   /help                 帮助
   /quit                 退出
-直接输入 = 「继续当前任务」（同一任务永远留在原 session 上执行）。
+普通输入默认开始新的会话；使用 /resume 恢复历史任务后，输入才会继续原 session。
 输入 / 打开命令菜单，↑↓ 选择，Tab 补全，Enter 确认。
 
 快捷键（交互终端）：
@@ -301,6 +302,7 @@ async function selectModel(model: string): Promise<void> {
   if (!currentTaskId) {
     const task = await router.newTask({ model, cwd, permission, reasoningEffort: effort });
     currentTaskId = task.id;
+    conversationMode = "fresh";
     tui?.setTask(task.id);
     tui?.setModel(model);
     out(C.green(`✓ 已选择 ${model}，可以开始对话了。`));
@@ -459,6 +461,7 @@ async function handleCommand(line: string): Promise<boolean> {
           out(C.green(`✓ 任务 ${currentTaskId} 已结束`));
         }
         currentTaskId = null;
+        conversationMode = "fresh";
         tui?.setTask(null);
         tui?.setModel(null);
         if (tui) tui.view.reasoningEffort = undefined;
@@ -532,20 +535,14 @@ async function runPrompt(text: string): Promise<void> {
     tui?.view.setInput(text);
     return;
   }
-  // Ctrl+C stops a turn but intentionally keeps its native session alive. A standalone
-  // greeting after coding/tool activity is a new conversational intent, so isolate it
-  // in a fresh task instead of letting the coding harness continue the old work.
-  if (isCasualGreeting(text)) {
-    const previousTaskId = currentTaskId;
-    const previous = router.status(previousTaskId);
-    if (previous.task.conversation.length > 0 && !cancelRequested) {
-      const model = previous.target?.model;
-      if (model) {
-        currentTaskId = null;
-        tui?.setTask(null); tui?.setModel(null);
-        await selectModel(model);
-        out("✓ 这是新的闲聊任务；之前的代码任务仍可用 /resume 恢复");
-      }
+  if (conversationMode === "fresh") {
+    const previous = router.status(currentTaskId);
+    const model = previous.target?.model;
+    if (previous.task.conversation.length > 0 && model) {
+      currentTaskId = null;
+      tui?.setTask(null); tui?.setModel(null); tui?.view.clearMessages();
+      await selectModel(model);
+      out("✓ 已开始新的会话；之前的任务可用 /resume 恢复");
     }
   }
   const activeTaskId = currentTaskId;

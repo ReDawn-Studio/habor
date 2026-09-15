@@ -170,7 +170,8 @@ try:
             sent = terminal.prompt('')
             matched = [r for r in sent if r['model'] == 'deepseek-flash' and r['auth'] == f'Bearer {first_key}']
             assert matched, 'New provider Key/model was not activated'
-            assert any('continuity 73' in json.dumps(r['body']) and 'continue draft' in json.dumps(r['body']) for r in matched)
+            assert any('continue draft' in json.dumps(r['body']) for r in matched)
+            assert all('continuity 73' not in json.dumps(r['body']) for r in matched), 'new sessions must not inherit prior conversation'
 
             # Change the active provider Key without changing the model label.
             terminal.send('\x1bOR\x1b[A\r\x1b[B\x1b[B')
@@ -191,9 +192,9 @@ try:
         finally:
             terminal.close()
         tasks = [json.loads(line) for line in (state / 'state.jsonl').read_text().splitlines() if line]
-        assert len(tasks) == 1, 'Saving a provider discarded the current task'
-        assert len(tasks[0]['bindings']) == 2
-        assert tasks[0]['bindings'][-1]['model'] == 'deepseek-flash · PTY gateway'
+        assert len(tasks) >= 4, 'Each ordinary prompt should have its own task'
+        assert any(task['bindings'][-1]['model'] == 'deepseek-flash · PTY gateway' for task in tasks)
+        assert any('continuity 73' in json.dumps(task['conversation']) for task in tasks), 'first task history was lost'
         for path in [state / 'state.jsonl', state / 'providers.json', state / 'selection.json']:
             assert all(key not in path.read_text() for key in [local_key, first_key, next_key])
         terminal = Terminal(work, state, dsh)
@@ -204,7 +205,7 @@ try:
             terminal.quit()
         finally:
             terminal.close()
-        print('Provider activation passed: TTY save-and-use, native HTTP credentials/model, task/draft continuity, Key refresh, save-only, restart and secret isolation')
+        print('Provider activation passed: TTY save-and-use, fresh ordinary sessions, native HTTP credentials/model, Key refresh, save-only, restart and secret isolation')
 finally:
     server.shutdown()
     server.server_close()

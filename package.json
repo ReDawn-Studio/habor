@@ -1,6 +1,6 @@
 {
   "name": "agent-router",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": true,
   "description": "原生 Agent 聚合平台 — 用户只选模型，任务自动跑在对应厂商的原生 harness 里",
   "type": "module",
