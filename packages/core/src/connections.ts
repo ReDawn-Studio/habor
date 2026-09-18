@@ -1,10 +1,10 @@
 import { validateReasoningDeclaration } from "./reasoning.js";
 
-export type AgentKind = "codex" | "claude" | "kimi" | "zcode" | "dsh";
+export type AgentKind = "codex" | "claude" | "kimi" | "zcode" | "dsh" | "gemini" | "qwen" | "grok";
 export type ApiProtocol = "responses" | "anthropic" | "openai";
 export type SourceKind = "local" | "official" | "custom";
-export const AGENT_NAMES: Record<AgentKind, string> = { codex: "Codex", claude: "Claude Code", kimi: "Kimi Code", zcode: "ZCode", dsh: "DeepSeek Harness" };
-export const AGENT_ADAPTERS: Record<AgentKind, string> = { codex: "codex-acp", claude: "claude-acp", kimi: "kimi-acp", zcode: "zcode", dsh: "dsh-acp" };
+export const AGENT_NAMES: Record<AgentKind, string> = { codex: "Codex", claude: "Claude Code", kimi: "Kimi Code", zcode: "ZCode", dsh: "DeepSeek Harness", gemini: "Gemini CLI", qwen: "Qwen Code", grok: "Grok Build" };
+export const AGENT_ADAPTERS: Record<AgentKind, string> = { codex: "codex-acp", claude: "claude-acp", kimi: "kimi-acp", zcode: "zcode", dsh: "dsh-acp", gemini: "gemini-cli", qwen: "qwen-cli", grok: "grok-cli" };
 export interface ProviderModel { id: string; agent: AgentKind; protocol: ApiProtocol; reasoningLevels?: string[] }
 export interface ProviderProfile {
   id: string;
@@ -22,6 +22,9 @@ export function inferAgent(model: string): AgentKind | undefined {
   if (/(?:^|\/)(?:kimi|k3(?:-|$))/.test(name)) return "kimi";
   if (/(?:^|\/)(?:glm|zcode)/.test(name)) return "zcode";
   if (/(?:^|\/)deepseek/.test(name)) return "dsh";
+  if (/(?:^|\/)(?:gemini|google)/.test(name)) return "gemini";
+  if (/(?:^|\/)(?:qwen|tongyi)/.test(name)) return "qwen";
+  if (/(?:^|\/)(?:grok|xai)/.test(name)) return "grok";
   return undefined;
 }
 export function protocolForAgent(agent: AgentKind): ApiProtocol {

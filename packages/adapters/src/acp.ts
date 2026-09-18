@@ -36,7 +36,7 @@ export interface AcpAgentSpec {
   harnessName: string;
   models: string[];
   /** 启动该 harness 的 ACP server 子进程 */
-  command(ctx: { model: string; modelId?: string; connection?: SessionOptions["connection"]; reasoningEffort?: string }): { cmd: string; argv: string[]; env?: NodeJS.ProcessEnv };
+  command(ctx: { model: string; modelId?: string; connection?: SessionOptions["connection"]; reasoningEffort?: string; permission?: SessionOptions["permission"] }): { cmd: string; argv: string[]; env?: NodeJS.ProcessEnv };
   /** 本机可用性检查 */
   isAvailable?(): Promise<boolean>;
   /** 是否后台保活（false 时每次 prompt 新建进程；默认 true 保活多轮） */
@@ -48,6 +48,7 @@ export function createAcpAdapter(spec: AcpAgentSpec): Adapter {
     id: spec.id,
     harnessName: spec.harnessName,
     models: spec.models,
+    protocol: "acp",
     isAvailable: async () => {
       if (spec.isAvailable) return spec.isAvailable();
       const { cmd } = spec.command({ model: spec.models[0] ?? "" });

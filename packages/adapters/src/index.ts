@@ -8,23 +8,26 @@
  */
 import type { Adapter } from "@agent-router/core";
 import { createAcpAdapter, type AcpAgentSpec } from "./acp.js";
+import { createAcpBridgeAdapter } from "./acp-bridge.js";
 import { ZcodeStreamAdapter } from "./zcode-stream.js";
 import { CodexNativeAdapter } from "./codex-native.js";
 import { ClaudeNativeAdapter } from "./claude-native.js";
-import { dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec } from "./specs-acp.js";
+import { dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec, geminiAcpSpec, qwenAcpSpec, grokAcpSpec } from "./specs-acp.js";
 
 export { createCliAdapter, type CliAgentSpec } from "./framework.js";
 export type { CliRunContext, Emit, CliExitContext } from "./framework.js";
 export { createAcpAdapter, type AcpAgentSpec } from "./acp.js";
+export { createAcpBridgeAdapter } from "./acp-bridge.js";
 export { ZcodeStreamAdapter } from "./zcode-stream.js";
 
 /**
  * 全部 adapter：
- *   - dsh / kimi / claude / codex → ACP 传输（多轮会话；dsh 走自建 dsh-acp）
- *   - zcode → ZCode Protocol 流式（自建 client，见 zcode-stream.ts）
+ *   - dsh / kimi → 原生 ACP 传输（多轮会话）
+ *   - codex / claude / zcode → ACP bridge（把各家的私有 CLI/RPC 包进同一
+ *     ACP session 生命周期；未来厂商提供原生 ACP 时可无感替换）
  * 新增 agent 加在这里。
  */
-export const ALL_ACP_SPECS: AcpAgentSpec[] = [dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec];
+export const ALL_ACP_SPECS: AcpAgentSpec[] = [dshAcpSpec, kimiAcpSpec, claudeAcpSpec, codexAcpSpec, geminiAcpSpec, qwenAcpSpec, grokAcpSpec];
 
 /**
  * 构建全部 adapter（注入给路由层）。
@@ -33,7 +36,9 @@ export const ALL_ACP_SPECS: AcpAgentSpec[] = [dshAcpSpec, kimiAcpSpec, claudeAcp
 export function createAdapters(): Adapter[] {
   const adapters: Adapter[] = [];
   for (const spec of [dshAcpSpec, kimiAcpSpec]) adapters.push(createAcpAdapter(spec));
-  adapters.push(new CodexNativeAdapter(), new ClaudeNativeAdapter());
-  adapters.push(new ZcodeStreamAdapter());
+  adapters.push(createAcpBridgeAdapter(new CodexNativeAdapter()));
+  adapters.push(createAcpBridgeAdapter(new ClaudeNativeAdapter()));
+  adapters.push(createAcpBridgeAdapter(new ZcodeStreamAdapter()));
+  for (const spec of [geminiAcpSpec, qwenAcpSpec, grokAcpSpec]) adapters.push(createAcpAdapter(spec));
   return adapters;
 }

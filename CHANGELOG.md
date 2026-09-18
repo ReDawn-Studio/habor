@@ -1,5 +1,14 @@
 # 更新日志
 
+## v0.5.9 — 2026-09-18
+
+- 全屏 TUI 默认启用鼠标滚轮上报，滚轮现在滚动 habor 内部对话记录，不再移动终端外层 scrollback。
+- 启动时清理备用屏幕的滚动位置，避免从已滚动的终端窗口启动后内容出现在中间位置。
+- `HABOR_MOUSE_SCROLL=0` 可恢复终端原生滚轮；`Ctrl+Y` 仍可复制最近一段回复。
+- Codex、Claude Code、ZCode 的 legacy CLI / 私有 RPC 统一通过 ACP bridge 接入路由层。
+- 路由层统一使用 ACP session 生命周期，包含 `session/new`、`session/prompt`、`session/update`、`session/cancel` 和 `session/close`。
+- Gemini CLI、Qwen Code、Grok Build 改用官方 ACP 入口，不再作为 F5 独立终端模型。
+
 ## v0.5.8 — 2026-09-16
 
 - `/resume` 统一展示当前工作区的 habor 任务与官方 Codex、Claude Code、Kimi Code 历史会话。

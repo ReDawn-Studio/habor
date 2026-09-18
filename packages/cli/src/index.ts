@@ -24,15 +24,15 @@ import { TurnEvents } from "./tui/events.js";
 import { ProviderStore } from "./providers.js";
 import { AGENT_ADAPTERS, AGENT_NAMES, reasoningLabel, configuredReasoning, type ReasoningCapabilities, type AgentKind, type ProviderProfile } from "@agent-router/core";
 import { ReasoningPreferences } from "./reasoning-preferences.js";
-import { AGENT_SETUP, EXTERNAL_AGENT_TARGETS, missingAgentMessage, openAgentInstallPage } from "./agent-setup.js";
+import { AGENT_SETUP, missingAgentMessage, openAgentInstallPage } from "./agent-setup.js";
 import { AgentInstaller } from "./agent-installer.js";
 import { nativeAuthStatus, nativeLoginCommand, type AuthMethod, type AuthStatus } from "./agent-auth.js";
 import { runAgentCommand } from "./agent-process.js";
-import { AGENT_RUNTIMES, agentExecutable, executableOnPath } from "@agent-router/core";
+import { AGENT_RUNTIMES } from "@agent-router/core";
 import { WorkspaceTrust } from "./workspace-trust.js";
 import { listOfficialHistories, type OfficialHistory } from "./official-history.js";
 
-const VERSION = "0.5.8";
+const VERSION = "0.5.9";
 if (process.argv.includes("--version")) { console.log(`habor v${VERSION}`); process.exit(0); }
 
 const C = {
@@ -211,7 +211,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   Esc / Ctrl+C          停止当前回复，保留会话界面
   Ctrl+C                清空草稿；空草稿下连按两次退出
 运行时可以继续编辑草稿，结束后按 Enter 发送。
-默认由终端处理鼠标拖选和复制；HABOR_MOUSE_SCROLL=1 时 habor 接管滚轮，使用终端支持的 Shift / Option 拖选。`;
+全屏 TUI 默认接管滚轮；HABOR_MOUSE_SCROLL=0 时恢复终端原生滚轮和拖选，回复也可以用 Ctrl+Y 复制。`;
 
 // —— 模型选择 ——
 
@@ -236,10 +236,9 @@ async function refreshConnections(): Promise<void> {
     tui.view.reasoningByModel = Object.fromEntries(registry.listModels().map(entry => [entry.model, reasoningPreferences.get(entry)]));
     tui.view.modelInfo = Object.fromEntries(registry.listModels().map(entry => {
       const agent = (Object.keys(AGENT_ADAPTERS) as AgentKind[]).find(kind => AGENT_ADAPTERS[kind] === entry.adapterId);
-      return [entry.model, { source: entry.sourceKind ?? "local", agent: agent ? AGENT_NAMES[agent] : entry.adapterId, modelId: entry.modelId ?? entry.model, adapterId: entry.adapterId, installed: !!availability[entry.adapterId] }];
+      return [entry.model, { source: entry.sourceKind ?? "local", agent: agent ? AGENT_NAMES[agent] : entry.adapterId, modelId: entry.modelId ?? entry.model, adapterId: entry.adapterId, installed: !!availability[entry.adapterId], protocol: registry.protocol(entry.model) }];
     }));
-    tui.view.externalAgentModels = EXTERNAL_AGENT_TARGETS.map(entry => entry.model);
-    for (const entry of EXTERNAL_AGENT_TARGETS) tui.view.modelInfo[entry.model] = { source: "local", agent: AGENT_SETUP[entry.adapterId].name, modelId: entry.modelId, adapterId: entry.adapterId, installed: !!executableOnPath(agentExecutable(entry.adapterId)), nativeTerminalOnly: true };
+    tui.view.externalAgentModels = [];
     tui.view.setModels(registry.listModels().map(entry => entry.model));
   }
 }
@@ -308,13 +307,6 @@ function resolveModelArg(arg: string, available: string[]): string | undefined {
 
 async function selectModel(model: string): Promise<void> {
   if (!workspaceTrust.isTrusted(cwd)) throw new Error("当前工作区尚未信任，请在交互终端选择“是，继续”，或运行 /trust");
-  const external = EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
-  if (external) {
-    if (!executableOnPath(agentExecutable(external.adapterId))) throw new Error(missingAgentMessage(external.adapterId));
-    await loginAgent(model, "native");
-    out(`已退出 ${AGENT_SETUP[external.adapterId].name} 独立会话，habor 原任务与草稿保留。`);
-    return;
-  }
   // Re-probe on selection: installation may have completed while the setup panel was open.
   await refreshConnections();
   const available = await listAvailable();
@@ -342,7 +334,7 @@ async function selectModel(model: string): Promise<void> {
 }
 
 async function installAgent(model: string, onOutput: (line: string) => void, signal: AbortSignal): Promise<string> {
-  const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+  const entry = registry.entry(model);
   if (!entry) throw new Error("模型不存在");
   return trackLifecycle(async () => {
     const version = await agentInstaller.install(entry.adapterId, { signal: AbortSignal.any([signal, lifecycleShutdown.signal]), onOutput });
@@ -356,15 +348,12 @@ async function installAgent(model: string, onOutput: (line: string) => void, sig
 }
 
 async function loginAgent(model: string, method: AuthMethod): Promise<AuthStatus> {
-  const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+  const entry = registry.entry(model);
   if (!entry || !tui) throw new Error("请在交互终端中选择 Agent 登录");
   const command = nativeLoginCommand(entry.adapterId, method, cwd);
   return trackLifecycle(async () => {
     const result = await tui!.withNativeTerminal(async () => {
-      const independent = EXTERNAL_AGENT_TARGETS.some(target => target.adapterId === entry.adapterId);
-      console.log(independent
-        ? `\n进入 ${AGENT_SETUP[entry.adapterId].name} 原生终端。使用 /auth 配置、/model 选型号，或开始独立对话；退出后返回 habor。原任务文本和草稿不会自动发送。\n`
-        : `\n正在进入 ${AGENT_SETUP[entry.adapterId]?.name ?? entry.adapterId} 原生认证。完成授权后返回 habor；Ctrl+C 可结束。\n`);
+      console.log(`\n正在进入 ${AGENT_SETUP[entry.adapterId]?.name ?? entry.adapterId} 原生认证。完成授权后返回 habor；Ctrl+C 可结束。\n`);
       return runAgentCommand(command, { inherit: true, signal: lifecycleShutdown.signal, timeoutMs: 15 * 60 * 1000 });
     });
     await refreshConnections();
@@ -707,13 +696,13 @@ async function main(): Promise<void> {
       onSaveProvider: saveProvider,
       onInstallAgent: installAgent,
       onLoginAgent: loginAgent,
-      onInspectAgentAuth: async model => nativeAuthStatus((registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model))?.adapterId ?? "", cwd),
+      onInspectAgentAuth: async model => nativeAuthStatus(registry.entry(model)?.adapterId ?? "", cwd),
       onCheckWorkspaceTrust: () => workspaceTrust.isTrusted(cwd),
       onTrustWorkspace: async () => { workspaceTrust.trust(cwd); out("✓ 已信任当前工作区"); },
       onWorkspaceTrustDenied: () => { void bye(); },
       onResumeTask: resumeAnyTask,
       onOpenAgentDocs: async model => {
-        const entry = registry.entry(model) ?? EXTERNAL_AGENT_TARGETS.find(entry => entry.model === model);
+        const entry = registry.entry(model);
         if (!entry) throw new Error("模型配置已变更，请重新选择");
         await openAgentInstallPage(entry.adapterId);
       },

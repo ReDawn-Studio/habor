@@ -63,6 +63,9 @@ export const MODEL_CATALOG: ModelEntry[] = [
   { model: "Claude Sonnet 5", modelId: "claude-sonnet-5", sourceKind: "local", adapterId: "claude-acp", vendor: "Anthropic", display: "Claude Code · 账号权限在连接时验证" },
   { model: "DeepSeek V4.1 Flash", modelId: "deepseek-flash", sourceKind: "local", adapterId: "dsh-acp", vendor: "DeepSeek", display: "官方 API ID deepseek-flash · 本机 DSH 来源由原生配置决定" },
   ...["Sol", "Terra", "Luna"].map(name => ({ model: `GPT-5.6 ${name}`, modelId: `gpt-5.6-${name.toLowerCase()}`, sourceKind: "local" as const, adapterId: "codex-acp", vendor: "OpenAI", display: "Codex CLI · 账号权限在连接时验证" })),
+  { model: "Gemini 3.8 Flash", modelId: "gemini-3.8-flash", sourceKind: "local", adapterId: "gemini-cli", vendor: "Google", display: "Gemini CLI · 官方 ACP" },
+  { model: "Qwen 3.8 Max", modelId: "qwen3.8-max-0902", sourceKind: "local", adapterId: "qwen-cli", vendor: "Qwen", display: "Qwen Code · 官方 ACP" },
+  { model: "Grok 4.6", modelId: "grok-4.6", sourceKind: "local", adapterId: "grok-cli", vendor: "xAI", display: "Grok Build · 官方 ACP" },
 ];
 
 /** 通过模型名查找其绑定的 harness。 */
@@ -88,6 +91,7 @@ export class Registry {
     this.resolveConnection = resolveConnection;
   }
   entry(model: string): ModelEntry | undefined { return this.entries.get(model); }
+  protocol(model: string): "acp" | undefined { return this.adapters.get(this.entries.get(model)?.adapterId ?? "")?.protocol; }
   listModels(): ModelEntry[] { return [...this.entries.values()]; }
   async availableAdapters(): Promise<Record<string, boolean>> {
     const results = await Promise.all([...this.adapters].map(async ([id, adapter]) => [id, await adapter.isAvailable().catch(() => false)] as const));

@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { AcpAgentSpec } from "./acp.js";
 import { documentedReasoning, agentExecutable, dshPackageAnchor } from "@agent-router/core";
+import { hasCommand } from "./base.js";
 
 const NPM_FLAGS = ["-y", "--silent"];
 
@@ -86,4 +87,28 @@ export const codexAcpSpec: AcpAgentSpec = {
     cmd: "npx",
     argv: [...NPM_FLAGS, "@zed-industries/codex-acp"]
   })
+};
+
+export const geminiAcpSpec: AcpAgentSpec = {
+  id: "gemini-cli",
+  harnessName: "Gemini CLI (Google 官方 ACP)",
+  models: ["Gemini 3.8 Flash"],
+  command: ({ modelId }) => ({ cmd: agentExecutable("gemini-cli"), argv: ["--acp", ...(modelId ? ["--model", modelId] : [])] }),
+  isAvailable: async () => hasCommand(agentExecutable("gemini-cli"))
+};
+
+export const qwenAcpSpec: AcpAgentSpec = {
+  id: "qwen-cli",
+  harnessName: "Qwen Code (Qwen 官方 ACP)",
+  models: ["Qwen 3.8 Max"],
+  command: ({ modelId }) => ({ cmd: agentExecutable("qwen-cli"), argv: ["--acp", ...(modelId ? ["--model", modelId] : [])] }),
+  isAvailable: async () => hasCommand(agentExecutable("qwen-cli"))
+};
+
+export const grokAcpSpec: AcpAgentSpec = {
+  id: "grok-cli",
+  harnessName: "Grok Build (xAI 官方 ACP)",
+  models: ["Grok 4.6"],
+  command: ({ modelId, permission }) => ({ cmd: agentExecutable("grok-cli"), argv: ["agent", ...(permission === "ask" ? [] : ["--always-approve"]), ...(modelId ? ["--model", modelId] : []), "stdio"] }),
+  isAvailable: async () => hasCommand(agentExecutable("grok-cli"))
 };

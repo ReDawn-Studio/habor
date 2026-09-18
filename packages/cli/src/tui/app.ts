@@ -79,7 +79,7 @@ export class AppView {
   availableModels: string[] = [];
   externalAgentModels: string[] = [];
   providers: ProviderProfile[] = [];
-  modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean }> = {};
+  modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean; protocol?: "acp" }> = {};
   agentSetupPanel: AgentSetupPanel | null = null;
   trustPanel: WorkspaceTrustPanel | null = null;
   resumePanel: ResumePanel | null = null;
@@ -593,7 +593,7 @@ export class AppView {
     const query = truncateWidth(picker.query, width - 12);
     write(2, picker.query ? `搜索：${query}` : "搜索：直接输入可筛选，也可直接按 ↑↓", picker.query ? THEME.text : THEME.textMuted);
     const info = this.modelInfo[matches[picker.index]];
-    if (info) write(3, info.nativeTerminalOnly ? `官方原生终端 · ${info.agent} · 用 /model 选择型号` : `${info.source === "local" ? "客户端已配置的登录 / Key" : info.source === "official" ? "官方 API" : "自定义 API"} → ${info.agent} · ${info.modelId}`, THEME.accent);
+    if (info) write(3, info.nativeTerminalOnly ? `官方原生终端 · ${info.agent} · 用 /model 选择型号` : `${info.protocol === "acp" ? "ACP" : info.source === "local" ? "客户端已配置的登录 / Key" : info.source === "official" ? "官方 API" : "自定义 API"} → ${info.agent} · ${info.modelId}`, THEME.accent);
     const start = Math.max(0, Math.min(picker.index - visible + 1, matches.length - visible));
     if (!matches.length) write(4, this.availableModels.length ? "没有匹配模型，按 Backspace 修改搜索" : "暂无可用模型，Esc 返回", THEME.warning);
     matches.slice(start, start + visible).forEach((model, i) => {

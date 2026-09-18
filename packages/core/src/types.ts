@@ -145,6 +145,8 @@ export interface Adapter {
   readonly harnessName: string;
   /** 该 adapter 能服务的用户可见模型名 */
   readonly models: string[];
+  /** Transport exposed to the router. Every production adapter is ACP. */
+  readonly protocol?: "acp";
   /** CLI 是否可用（本机是否安装/可调用） */
   isAvailable(): Promise<boolean>;
   createSession(opts: SessionOptions): Promise<Session>;

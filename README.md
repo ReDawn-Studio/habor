@@ -13,7 +13,7 @@
                 │     Router      │  按「模型 → 原生 harness」路由，带 Task 亲和性
                 └────────┬────────┘
                 ┌────────▼────────┐
-                │ Protocol/Gateway│  ACP（JSON-RPC over stdio）/ CLI 子进程
+                │ Protocol/Gateway│  ACP（统一 session 生命周期）
                 └────────┬────────┘
         ┌────────────────┼────────────────┐
         ▼                ▼                ▼
@@ -61,7 +61,7 @@ F2 打开面板时会保留原有草稿和光标位置。
 停止回复后保留当前任务和已收到的回答，后续输入会在同一模型上重建连接并带入任务上下文。
 工具结果按调用 ID 匹配；思考与长输出默认折叠，输入/输出 token 数放在状态栏。
 默认由终端处理鼠标拖选和复制：直接拖动选择后使用终端的 Cmd+C / Ctrl+Shift+C。
-需要 habor 接管滚轮时设置 `HABOR_MOUSE_SCROLL=1`；此模式下按住终端支持的 Shift / Option 再拖动选择。
+全屏 TUI 默认接管滚轮，滚轮会在 habor 的对话记录内滚动，而不是滚动终端外层的 scrollback。需要恢复终端原生滚轮/拖选时设置 `HABOR_MOUSE_SCROLL=0`；支持该功能的终端可按住 Option 再拖动选择，回复也可以用 `Ctrl+Y` 复制。
 
 首次选择模型进入一个未信任的目录时，会显示工作区信任确认。选择“是，继续”后才会创建 Agent 任务；选择“否，退出”会退出 habor。
 确认记录保存在 `~/.habor/trust.json`，按工作区目录分别保存；也可以使用 `/trust` 再次打开确认面板。
@@ -115,11 +115,12 @@ DeepSeek 官方连接在界面显示 **DeepSeek V4.1 Flash**，请求发送 `mod
 
 | 执行 Agent | API 连接方式 |
 |---|---|
-| Codex | 原生 `codex app-server`，Responses API，模型和提供商都在创建任务时显式指定 |
-| Claude Code | 本机 `claude --print`，Anthropic Messages API；单次启动配置覆盖本地旧的连接变量 |
+| Codex | ACP bridge → 原生 `codex app-server`，Responses API，模型和提供商都在创建任务时显式指定 |
+| Claude Code | ACP bridge → 本机 `claude --print`，Anthropic Messages API；单次启动配置覆盖本地旧的连接变量 |
 | Kimi Code | 原生 ACP，`KIMI_MODEL_*` 临时模型配置，OpenAI Chat Completions / Anthropic Messages |
-| ZCode | 原生 app-server，临时 runtimeModel，支持 OpenAI Chat Completions / Responses / Anthropic Messages |
+| ZCode | ACP bridge → 原生 app-server，临时 runtimeModel，支持 OpenAI Chat Completions / Responses / Anthropic Messages |
 | DeepSeek Harness | 原生 DSH Agent 内注册独立 API 连接，使用 DeepSeek / OpenAI Chat Completions 协议 |
+| Gemini CLI / Qwen Code / Grok Build | 原生 ACP（`--acp` / `agent stdio`），由 habor 统一会话和权限事件 |
 
 同一个第三方网关可以给不同模型配置不同协议。仅支持 `/chat/completions` 的服务不能直接当作 Codex 的 `/responses` 使用；
 需要网关支持对应协议与工具调用，模型名称本身不改变接口能力。
@@ -142,7 +143,7 @@ F2 保留所有已配置的模型，未检测到客户端时显示“待安装�
 
 **F5 / `/agents`** 管理 Agent，**`/login`** 管理当前 Agent 的认证：
 
-- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code；Grok Build 通过官方 shell 安装入口和原生终端管理。使用官方来源；安装前显示动作与目标目录。
+- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code；Grok Build 通过官方 shell 安装入口管理。使用官方来源；安装前显示动作与目标目录。
 - Codex / Claude / Kimi 使用官方 npm `latest`；DSH 自建桥接固定在已验证的 `0.1.0-rc.8`。实测 `0.1.5-rc.1` 虽可安装，但现有桥接无法完成 ACP 连接，因此暂不启用。Agent 程序版本和模型版本独立，兼容版本仍可调用 V4.1 Flash。
 - DSH 显式安装已验证的 peer 依赖集合，再使用 `--legacy-peer-deps` 避开 npm 的循环 peer 解析；并非只跳过所需依赖。
 - 包下载到 `~/.habor/agents/<adapter>/versions/<installation-id>`，通过包标识与可执行文件版本检查后，原子更新 `active.json`。失败或取消不会切换到半安装版本；旧版本留存。
@@ -152,7 +153,7 @@ F2 保留所有已配置的模型，未检测到客户端时显示“待安装�
 - 登录阶段临时将终端交给官方客户端。验证码、浏览器授权和输入由客户端处理，凭据由其保存与刷新；退出或 Ctrl+C 后恢复 habor 的界面和草稿。认证输出不进入任务历史。
 - 官方 API Key 直接进入预填地址的隐藏输入表单；自定义来源可填写 URL、Key 和模型，并明确选择执行 Agent。已保存的 API 来源无需再进行订阅登录。
 - 登录状态仅在原生客户端明确报告时显示“已认证”；安装成功、配置文件存在或启动桌面软件都不等于认证成功。账号额度与具体模型权限在连接时验证。
-- Gemini CLI / Qwen Code 位于 F5 的 Agent 列表，提供自动安装、原生 `/auth` 配置与明确标注的“独立会话”入口。它们暂不出现在 F2 的 habor 会话路由中；原任务文本和草稿不会自动发送到外部终端，退出后回到原任务。
+- Gemini CLI / Qwen Code / Grok Build 位于 F2 的 ACP 模型列表和 F5 的 Agent 管理中。认证仍由原生 CLI 完成，提示、工具事件、取消和任务上下文统一回到 habor。
 
 ZCode 没有在本项目中核实可用于自动安装的官方 npm 分发，继续提供官方桌面安装入口。
 Windows 原生自动安装尚未实现，可使用 WSL 或官方安装页。外部安装改变 PATH 后需重启 habor；`/refresh` 可重新检测当前环境。
@@ -215,7 +216,7 @@ Task #1024 ──► Claude Session xyz（任务还是同一个）
 packages/
 ├── core/       # 契约层：Agent/Session/Event/Permission 统一类型
 ├── router/     # ★ 路由层（独立子项目）：MODEL_CATALOG（模型→harness）/ Registry / TaskStore（State 层）/ TaskRouter（亲和性路由+任务简报）
-├── adapters/   # 传输层：ACP client 框架 + ZCode Protocol + 各家 spec（注入给路由层）
+├── adapters/   # 传输层：原生 ACP client + legacy→ACP bridge + 各家实现（注入给路由层）
 ├── cli/        # habor：终端客户端（模型选择器 / 任务 / 会话 / 流式 markdown 渲染）
 └── dsh-acp/    # DeepSeek Harness 的 ACP server（in-process 引导）
 ```
@@ -228,10 +229,13 @@ packages/
 | 用户可见模型 | 内部 harness | 传输 | 入口（实测） |
 |---|---|---|---|
 | DeepSeek V4 Flash / Pro | DeepSeek Harness | **ACP（自建 dsh-acp）** | `packages/dsh-acp`：in-process 引导 DSH + 标准 ACP server |
-| GLM-5.3 | ZCode | **ZCode Protocol 流式** | 自建 client（session/create → subscribe → send → 事件流），真流式 + 多轮记忆 |
+| GLM-5.3 | ZCode | **ACP bridge** | ZCode app-server 被包在标准 ACP session 生命周期后，保留真流式 + 多轮记忆 |
 | Kimi K3 | Kimi Code | ACP | `kimi acp` |
-| Claude Sonnet 4.6 / Fable 5 | Claude Code | 原生 stream-json | 本机 `claude --print --model ...` |
-| GPT-5.5 / GPT-6 Astra | Codex | 原生 app-server | 本机 `codex app-server`，显式 model + provider |
+| Claude Sonnet 4.6 / Fable 5 | Claude Code | **ACP bridge** | Claude Code 的 stream-json 被包在标准 ACP session 生命周期后 |
+| GPT-5.5 / GPT-6 Astra | Codex | **ACP bridge** | Codex 的 app-server 被包在标准 ACP session 生命周期后 |
+| Gemini 3.8 Flash | Gemini CLI | **ACP** | `gemini --acp` |
+| Qwen 3.8 Max | Qwen Code | **ACP** | `qwen --acp` |
+| Grok 4.6 | Grok Build | **ACP** | `grok agent stdio` |
 
 认证：订阅/OAuth 登录自动复用（macOS Keychain / `~/.codex/auth.json` 等），本地无需 API key。
 
@@ -247,8 +251,10 @@ packages/
 
 ## 接入新的 agent（声明式，~30 行）
 
+生产路由层只接受 ACP。已经原生支持 ACP 的 Agent 直接使用 `createAcpAdapter`；只有 CLI 或私有 RPC 的 Agent 使用 `createAcpBridgeAdapter(legacyAdapter)`。bridge 把 `session/new`、`session/prompt`、`session/update`、`session/cancel` 和 `session/close` 统一起来，因此 Router、TUI、权限处理和后续的官方 ACP Agent 不需要为每家单独分支。
+
 ```ts
-// 方式一：CLI 子进程（一次性）
+// legacy 实现仍可保留各家的 CLI / app-server 细节
 const mySpec: CliAgentSpec = {
   id: "my-harness",
   harnessName: "My Harness",
@@ -257,13 +263,15 @@ const mySpec: CliAgentSpec = {
   buildCommand: ({ prompt, cwd }) => ({ cmd: "my-cli", argv: ["--run", prompt, "--cwd", cwd] }),
   onExit: ({ exitCode, stderr }, emit) => { /* 错误兜底 */ }
 };
-// 方式二：ACP server（多轮会话）
+// 生产注册时统一包成 ACP
 const myAcp: AcpAgentSpec = {
   id: "my-acp",
   harnessName: "My Harness (ACP)",
   models: ["My Model"],
   command: () => ({ cmd: "my-cli", argv: ["acp"] })
 };
+const adapter = createAcpAdapter(myAcp);
+// legacy adapter 则：const adapter = createAcpBridgeAdapter(myLegacyAdapter)
 // 然后在 core/registry.ts 的 MODEL_CATALOG 登记「用户可见模型 → adapterId」
 ```
 
@@ -272,9 +280,10 @@ const myAcp: AcpAgentSpec = {
 - [x] core（Session/Registry/Event/Workspace 雏形）
 - [x] CLI 路由层（模型选择器 + 任务 + 亲和性 + 状态持久化）
 - [x] ACP 传输层（多轮会话 + 权限桥接）
-- [x] ZCode Protocol 流式 adapter（app-server 双向 JSON-RPC，text_delta 流式 + 多轮记忆）
+- [x] ZCode app-server → ACP bridge（text_delta 流式 + 多轮记忆）
 - [x] Claude Code 风格渲染（流式 markdown：加粗/代码/列表/代码块 + 工具调用样式 + 推理斜体）
 - [x] **dsh-acp**：DeepSeek Harness 的 ACP server（in-process 引导 DSH + 标准 ACP 协议，实测多轮/工具/流式全通）
+- [x] Codex / Claude / ZCode legacy transport 的 ACP bridge
 - [ ] Router-as-ACP-Server：对外暴露为单个 ACP agent，可直接接入 OpenHands Agent Canvas / acp-agent-hub / Zed
 - [ ] Workspace 文件系统能力（ACP fs 协议）+ 上下文压缩/摘要（ContextSnapshot 的 LLM 化）
 - [ ] Checkpoint 落 git（worktree 隔离 + 可回滚）

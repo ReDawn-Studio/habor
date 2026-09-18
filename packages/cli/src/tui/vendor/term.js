@@ -372,11 +372,14 @@ export class Terminal extends EventEmitter {
     }
     this.input.on('data', this._onData)
     this.output.on('resize', this._onResize)
-    // Keep mouse reporting off by default so macOS Terminal/iTerm can perform
-    // native drag selection and Cmd+C. Set HABOR_MOUSE_SCROLL=1 to let habor
-    // receive wheel events instead.
-    const mouse = process.env.HABOR_MOUSE_SCROLL === '1' ? '\x1b[?1000h\x1b[?1006h' : ''
-    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l' + mouse + '\x1b[?2004h\x1b[2J\x1b[H')
+    // A full-screen TUI must own the wheel or the host terminal scrolls its
+    // outer scrollback instead of the transcript.  Native selection remains
+    // available with Option-drag on terminals that support it; set
+    // HABOR_MOUSE_SCROLL=0 when the host's drag-selection behaviour is more
+    // important than wheel scrolling.  Clear both the alternate screen and
+    // its scroll position so a launch after terminal scrolling starts at row 1.
+    const mouse = process.env.HABOR_MOUSE_SCROLL === '0' ? '' : '\x1b[?1000h\x1b[?1006h'
+    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l' + mouse + '\x1b[?2004h\x1b[3J\x1b[2J\x1b[H')
     this.raw = true
   }
 

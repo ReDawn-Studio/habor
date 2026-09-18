@@ -6,15 +6,15 @@
 
 | 厂商 | 当前主力型号 / API ID | 官方 CLI 或软件 | 安装与认证 | habor v0.5 接入状态 |
 |---|---|---|---|---|
-| OpenAI | GPT-6 Astra / `gpt-6-astra`；GPT-5.6 Sol / Terra / Luna | Codex CLI、Codex 应用 | `@openai/codex`；ChatGPT 浏览器授权、设备码或 API Key | 原生 app-server 会话；托管 npm 安装、浏览器 / 设备码登录、API 来源 |
-| Anthropic | Claude Fable 5.1 / `claude-fable-5-1`；Opus 5、Sonnet 5 | Claude Code、Claude Desktop 的 Code 功能 | `@anthropic-ai/claude-code` 或官方原生安装器；账号授权或 API Key | 原生流式会话；托管 npm 安装、原生登录、API 来源 |
+| OpenAI | GPT-6 Astra / `gpt-6-astra`；GPT-5.6 Sol / Terra / Luna | Codex CLI、Codex 应用 | `@openai/codex`；ChatGPT 浏览器授权、设备码或 API Key | ACP bridge → 原生 app-server；托管 npm 安装、浏览器 / 设备码登录、API 来源 |
+| Anthropic | Claude Fable 5.1 / `claude-fable-5-1`；Opus 5、Sonnet 5 | Claude Code、Claude Desktop 的 Code 功能 | `@anthropic-ai/claude-code` 或官方原生安装器；账号授权或 API Key | ACP bridge → 原生流式会话；托管 npm 安装、原生登录、API 来源 |
 | DeepSeek | V4.1 Flash / `deepseek-flash` | DeepSeek Harness（DSH） | `@deepseek-ai/dsh@0.1.0-rc.8`（桥接兼容版本）；原生提供商 Key 或 habor API Key | 原生 DSH + ACP；托管安装、Web 原生配置、API 来源 |
-| Google | Gemini 3.8 Flash / `gemini-3.8-flash`；3.1 Pro Preview | Gemini CLI；另有云端 Antigravity Agent 产品 | `@google/gemini-cli`；Google 登录、Gemini API Key、Vertex AI | F5 支持托管安装、原生认证与独立终端；尚未接入 habor 的统一消息流和任务上下文 |
-| Alibaba / Qwen | Qwen3.8-Max-0902 / `qwen3.8-max-0902`、Qwen3.8 Flash；编码专用 Qwen3-Coder-Next | Qwen Code | `@qwen-code/qwen-code`；ModelStudio Coding Plan / Token Plan / API Key、自定义提供商 | F5 支持托管安装、原生 `/auth` 与独立终端；尚未接入 habor 的统一消息流和任务上下文 |
+| Google | Gemini 3.8 Flash / `gemini-3.8-flash`；3.1 Pro Preview | Gemini CLI；另有云端 Antigravity Agent 产品 | `@google/gemini-cli`；Google 登录、Gemini API Key、Vertex AI | 官方 `gemini --acp`；habor 统一 ACP 会话、托管安装、认证和来源配置 |
+| Alibaba / Qwen | Qwen3.8-Max-0902 / `qwen3.8-max-0902`、Qwen3.8 Flash；编码专用 Qwen3-Coder-Next | Qwen Code | `@qwen-code/qwen-code`；ModelStudio Coding Plan / Token Plan / API Key、自定义提供商 | 官方 `qwen --acp`；habor 统一 ACP 会话、托管安装、认证和来源配置 |
 | Moonshot | Kimi K3；API 与 Code 别名需按来源分别核对 | Kimi Code CLI、IDE 集成 | `@moonshot-ai/kimi-code`；设备码 OAuth 或 API Key | 原生 ACP；托管安装、设备码登录、API 来源 |
 | Z.ai / 智谱 | GLM-5.3、GLM-5.3-Flash | ZCode 桌面应用，内置 ZCode Agent | 官方桌面安装程序；Z.ai / BigModel 账号与 Coding Plan，或 API Key | 已接入本机 ZCode app-server；提供软件与认证入口，未伪造 npm 安装方式 |
 | MiniMax | MiniMax M3 / `MiniMax-M3` | MiniMax Code / MiniMax Agent 桌面与网页产品 | 官方软件下载与账号、Token Plan / API 接入 | 软件存在；本次未核实足够稳定的公开本地控制协议与官方 npm CLI，未宣称原生会话接入 |
-| xAI | Grok 4.6 / `grok-4.6` | Grok Build CLI / TUI / ACP | 官方 shell 安装器；浏览器登录或 `XAI_API_KEY` | F5 提供原生独立终端；尚未接入 habor 的统一消息流和任务上下文 |
+| xAI | Grok 4.6 / `grok-4.6` | Grok Build CLI / TUI / ACP | 官方 shell 安装器；浏览器登录或 `XAI_API_KEY` | 官方 `grok agent stdio`；habor 统一 ACP 会话、托管安装、认证和来源配置 |
 
 ## 官方依据
 
@@ -26,7 +26,7 @@
 - Kimi：[K3 与 Code](https://www.kimi.com/code/en)、[安装与认证](https://www.kimi.com/code/docs/en/kimi-code-cli/guides/getting-started)、[login 子命令](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command)。本机 CLI 的 `login --help` 还列出地区参数，表明本机版本帮助也是实现时需要核对的证据。
 - ZCode：[官方 Agent](https://zcode.z.ai/en)、[安装程序](https://zcode.z.ai/cn/docs/install)、[连接模型及计划](https://zcode.z.ai/en/docs/configuration)。
 - MiniMax：[M3 与 MiniMax Code](https://www.minimax.io/blog/minimax-m3)、[官方软件入口](https://www.minimax.io/)。
-- xAI：[Grok Build 官方 CLI](https://docs.x.ai/build/overview)、[当前 Grok 模型](https://docs.x.ai/developers/models)。Grok Build 支持 TUI、无头模式和 ACP；本版本先以原生独立终端接入。
+- xAI：[Grok Build 官方 CLI](https://docs.x.ai/build/overview)、[ACP agent stdio](https://docs.x.ai/build/cli/reference)、[当前 Grok 模型](https://docs.x.ai/developers/models)。
 
 ## 推荐的产品结构
 
@@ -63,8 +63,6 @@
 | 内置通用 Agent + 多家 API | 安装步骤少，工具和认证由 habor统一管理 | 需要自己实现文件操作、权限、会话、工具执行；不能声称具有原生 Agent 的相同行为；账号订阅通常不能替代 API 凭据 |
 | GUI 自动化驱动厂商软件 | 可覆盖无公开协议的产品 | 易受 UI 更新影响，难以可靠管理权限和并发，不宜作为默认核心连接 |
 
-当前实现针对已有五条原生会话链路完成生命周期管理，并为 Gemini / Qwen 提供原生独立终端入口；研究清单覆盖更广的厂商。
-独立终端模式可安装、认证并在官方 CLI 中选择型号、执行任务，但不会自动继承 habor 的任务文本，也不把原生输出写成 habor 回复。
-Gemini、Qwen 等应在验证其公开会话协议、模型选择、认证取消和工具权限之后，再标为“已接入统一会话”。
+当前实现把原生 ACP 和 legacy CLI / 私有 RPC 都收敛到同一个 ACP session 边界；Gemini、Qwen、Grok 直接使用官方 ACP，Codex、Claude Code、ZCode 通过 ACP bridge 保留既有运行时能力。
 
 所有会读取或执行当前目录内容的 Agent 都会先经过 habor 的工作区信任确认。这个确认和后续每次命令审批是两层独立控制。
