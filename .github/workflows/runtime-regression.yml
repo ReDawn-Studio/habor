@@ -16,8 +16,6 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
-    env:
-      HABOR_STATE_DIR: ${{ runner.temp }}/habor-ci
     steps:
       - uses: actions/checkout@v7
         with:
@@ -26,6 +24,9 @@ jobs:
         with:
           node-version: '22.22.2'
           package-manager-cache: false
+      - name: Set isolated agent state directory
+        shell: bash
+        run: printf 'HABOR_STATE_DIR=%s/habor-ci\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Install package manager
         run: npm install --global pnpm@11.22.0
       - name: Install dependencies
