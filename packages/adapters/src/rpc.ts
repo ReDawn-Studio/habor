@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
-import { toDisplayText, redactSecrets } from "@agent-router/core";
+import { toDisplayText, redactSecrets, commandInvocation, stopProcess } from "@agent-router/core";
 
 /** Line-delimited JSON-RPC over an owned native process; failed requests always settle. */
 export class NativeRpc {
@@ -13,7 +13,8 @@ export class NativeRpc {
   private stderr = "";
   private closed = false;
   constructor(cmd: string, argv: string[], cwd: string, env = process.env, private secrets: string[] = []) {
-    this.child = spawn(cmd, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    const launch = commandInvocation(cmd, argv);
+    this.child = spawn(launch.command, launch.args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.child.stderr.on("data", data => { this.stderr = (this.stderr + data.toString()).slice(-4000); });
     createInterface({ input: this.child.stdout }).on("line", line => {
       let message: any;
@@ -58,7 +59,7 @@ export class NativeRpc {
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(safe); }
     this.pending.clear(); this.onClose(safe);
   }
-  close(): void { this.fail(new Error("会话已关闭")); this.child.kill("SIGTERM"); const child = this.child; setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 1000).unref(); }
+  async close(): Promise<void> { this.fail(new Error("会话已关闭")); await stopProcess(this.child); }
 }
 
 export class EventQueue<T> {

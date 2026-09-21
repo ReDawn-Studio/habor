@@ -3,6 +3,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import { commandInvocation, executableOnPath } from "@agent-router/core";
 
 export interface SpawnOptions {
   cmd: string;
@@ -22,7 +23,8 @@ export interface SpawnResult {
 /** 收集 stdout/stderr 并等待进程结束。 */
 export function runCli(opts: SpawnOptions): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const child = spawn(opts.cmd, opts.argv, {
+    const launch = commandInvocation(opts.cmd, opts.argv);
+    const child = spawn(launch.command, launch.args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["ignore", "pipe", "pipe"]
@@ -58,7 +60,8 @@ export function runCliLines(opts: SpawnOptions): {
   lines: AsyncIterable<string>;
   result: Promise<SpawnResult>;
 } {
-  const child = spawn(opts.cmd, opts.argv, {
+  const launch = commandInvocation(opts.cmd, opts.argv);
+  const child = spawn(launch.command, launch.args, {
     cwd: opts.cwd,
     env: { ...process.env, ...opts.env },
     stdio: ["ignore", "pipe", "pipe"]
@@ -98,13 +101,7 @@ export function runCliLines(opts: SpawnOptions): {
 
 /** 查找本机是否安装了某个命令。 */
 export async function hasCommand(cmd: string): Promise<boolean> {
-  try {
-    // Use the launch environment, not a login shell that may discover a different PATH.
-    const r = await runCli({ cmd: "sh", argv: ["-c", 'command -v "$1"', "habor", cmd], timeoutMs: 10000 });
-    return r.exitCode === 0 && r.stdout.trim().length > 0;
-  } catch {
-    return false;
-  }
+  return executableOnPath(cmd) !== undefined;
 }
 
 export function resolveNode(): string {

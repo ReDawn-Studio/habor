@@ -11,6 +11,7 @@
  */
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { AcpAgentSpec } from "./acp.js";
 import { documentedReasoning, agentExecutable, dshPackageAnchor } from "@agent-router/core";
 import { hasCommand } from "./base.js";
@@ -21,9 +22,9 @@ const NPM_FLAGS = ["-y", "--silent"];
 function resolveDshAcpEntry(): string {
   const candidates = [
     // 构建产物（packages/adapters/dist → packages/dsh-acp/dist）
-    new URL("../../dsh-acp/dist/index.js", import.meta.url).pathname,
+    fileURLToPath(new URL("../../dsh-acp/dist/index.js", import.meta.url)),
     // 源码运行（packages/adapters/src → packages/dsh-acp/dist）
-    new URL("../../../dsh-acp/dist/index.js", import.meta.url).pathname,
+    fileURLToPath(new URL("../../../dsh-acp/dist/index.js", import.meta.url)),
     // 仓库根目录运行时
     join(process.cwd(), "packages/dsh-acp/dist/index.js")
   ];

@@ -13,6 +13,7 @@
     "test": "pnpm build && node --test packages/cli/test/*.test.mjs packages/router/test/*.test.mjs",
     "test:native": "pnpm build && node packages/cli/test/native-provider-http.mjs",
     "test:dsh-local": "pnpm build && node packages/cli/test/dsh-local-diagnostics.mjs",
+    "test:dsh-isolation": "pnpm build && node packages/cli/test/dsh-runtime-isolation.mjs",
     "dev": "pnpm -r --parallel dev",
     "cli": "pnpm --filter @agent-router/cli start",
     "habor": "pnpm --filter @agent-router/cli start"

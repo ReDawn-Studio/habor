@@ -26,7 +26,8 @@ test('provider keys are separate and private; routing passes exact model ID and 
   const dir=mkdtempSync(join(tmpdir(),'habor-provider-'));
   try {
     const store=new ProviderStore(dir); store.save(profile,key);
-    assert.equal(statSync(join(dir,'credentials.json')).mode & 0o777,0o600);
+    // Windows ACLs, unlike POSIX mode bits, are not represented by stat().mode.
+    if(process.platform!=='win32')assert.equal(statSync(join(dir,'credentials.json')).mode & 0o777,0o600);
     assert.ok(!readFileSync(join(dir,'providers.json'),'utf8').includes(key));
     assert.ok(!JSON.stringify(store.list()).includes(key)); assert.ok(!JSON.stringify(store.entries()).includes(key));
     const seen=[];

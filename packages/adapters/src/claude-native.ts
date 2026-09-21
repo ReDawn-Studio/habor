@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { redactSecrets, toDisplayText, configuredReasoning, assertReasoningLevel, type ReasoningCapabilities, type Adapter, type AgentEvent, type Session, type SessionOptions } from "@agent-router/core";
 import { hasCommand } from "./base.js";
 import { EventQueue } from "./rpc.js";
-import { agentExecutable } from "@agent-router/core";
+import { agentExecutable, commandInvocation, stopProcess } from "@agent-router/core";
 
 export function claudeLaunch(opts: SessionOptions, sessionId: string, resume: boolean, resetEffort = false): { argv: string[]; env: NodeJS.ProcessEnv; settings?: { env: Record<string, string> } } {
   const modelId = opts.modelId ?? opts.model;
@@ -70,7 +70,8 @@ class ClaudeSession implements Session {
       writeFileSync(path, JSON.stringify(launch.settings), { mode: 0o600 });
       launch.argv.push("--settings", path);
     }
-    const child = spawn(agentExecutable("claude-acp"), launch.argv, { cwd: this.cwd, env: launch.env, stdio: ["pipe", "pipe", "pipe"] });
+    const invocation = commandInvocation(agentExecutable("claude-acp"), launch.argv);
+    const child = spawn(invocation.command, invocation.args, { cwd: this.cwd, env: launch.env, stdio: ["pipe", "pipe", "pipe"] });
     this.child = child;
     let stderr = "", streamedMessage = false, failed = false;
     child.stderr.on("data", data => { stderr = (stderr + data.toString()).slice(-4000); });
@@ -100,13 +101,12 @@ class ClaudeSession implements Session {
     child.on("close", code => { if (code && !failed) fail(stderr || `Claude Code 已退出 (${code})`); queue.finish(); });
     child.stdin.end(input);
     try { for await (const event of queue) yield event; }
-    finally { if (child.exitCode === null) child.kill("SIGTERM"); }
+    finally { await stopProcess(child); }
     yield { type: "done", ts: Date.now(), model: this.model, adapterId: this.adapterId, sessionId: this.id };
   }
-  async cancel(): Promise<void> { this.child?.kill("SIGTERM"); }
+  async cancel(): Promise<void> { if (this.child) await stopProcess(this.child); }
   async close(): Promise<void> {
-    const child = this.child; child?.kill("SIGTERM");
-    if (child) setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 1000).unref();
+    if (this.child) await stopProcess(this.child);
     if (this.settingsDir) { rmSync(this.settingsDir, { recursive: true, force: true }); this.settingsDir = undefined; }
   }
 }

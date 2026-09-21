@@ -28,7 +28,8 @@ import type {
   SessionOptions
 } from "@agent-router/core";
 import { hasCommand } from "./base.js";
-import { describeAgentError, reasoningLabel, assertReasoningLevel, type ReasoningCapabilities } from "@agent-router/core";
+import { ProcessDiagnostics } from "./process-diagnostics.js";
+import { describeAgentError, reasoningLabel, assertReasoningLevel, commandInvocation, stopProcess, closeProcess, type ReasoningCapabilities } from "@agent-router/core";
 
 /** 一个原生 harness 的 ACP 接入规格。 */
 export interface AcpAgentSpec {
@@ -41,6 +42,8 @@ export interface AcpAgentSpec {
   isAvailable?(): Promise<boolean>;
   /** 是否后台保活（false 时每次 prompt 新建进程；默认 true 保活多轮） */
   keepAlive?: boolean;
+  /** Bound startup and session creation even when the child never speaks ACP. */
+  startupTimeoutMs?: number;
 }
 
 export function createAcpAdapter(spec: AcpAgentSpec): Adapter {
@@ -109,11 +112,39 @@ class AcpSession implements Session {
   private connect(): Promise<boolean> {
     return new Promise<boolean>((resolveConnect, rejectConnect) => {
       const { cmd, argv, env } = this.spec.command(this.opts);
-      const proc = spawn(cmd, argv, { cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
-      // Server diagnostics must not overwrite the terminal's managed screen.
-      proc.stderr?.resume();
+      const launch = commandInvocation(cmd, argv);
+      const proc = spawn(launch.command, launch.args, { cwd: this.opts.cwd, stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...env } });
+      // Retain the actual boot failure instead of hiding it behind "ACP connection closed".
+      const diagnostics = new ProcessDiagnostics([this.opts.connection?.apiKey ?? "", ...Object.entries({ ...process.env, ...env })
+        .filter(([name]) => /(?:KEY|TOKEN|SECRET|PASSWORD)/i.test(name)).map(([, value]) => value ?? "")]);
+      proc.stderr?.on("data", chunk => diagnostics.push(chunk));
+      proc.stderr?.once("end", () => diagnostics.finish());
+      const exited = new Promise<void>(resolve => proc.once("close", () => resolve()));
       this.proc = proc;
-      proc.on("error", (err) => rejectConnect(err));
+      let ready = false;
+      let failing: Promise<void> | undefined;
+      let startupTimer: NodeJS.Timeout | undefined;
+      const fail = (error: unknown): Promise<void> => {
+        if (ready) return Promise.resolve();
+        if (failing) return failing;
+        failing = (async () => {
+          clearTimeout(startupTimer);
+          await stopProcess(proc);
+          await exited;
+          if (this.proc === proc) { this.active = null; this.client = undefined; this.conn = null; }
+          const failure = describeAgentError(error, [this.opts.connection?.apiKey ?? ""]);
+          if (/ACP connection closed|connection (?:closed|lost)|EPIPE|EOF|启动超时/i.test(failure.message)) {
+            const status = failure.code === "ACP_STARTUP_TIMEOUT" ? failure.message : proc.exitCode !== null ? `退出码 ${proc.exitCode}` : proc.signalCode ?? "连接已关闭";
+            rejectConnect(Object.assign(new Error(`${this.spec.harnessName} 连接失败（${status}）。\n${diagnostics.text() || failure.message}`), { code: failure.code ?? "ACP_PROCESS_EXIT" }));
+          } else rejectConnect(error instanceof Error ? error : new Error(failure.message));
+        })();
+        return failing;
+      };
+      proc.once("error", error => { void fail(error); });
+      proc.stdin?.on("error", error => { void fail(error); });
+      startupTimer = setTimeout(() => {
+        void fail(Object.assign(new Error("客户端启动超时，请检查安装和连接配置后重试"), { code: "ACP_STARTUP_TIMEOUT" }));
+      }, this.spec.startupTimeoutMs ?? 30000);
 
       const input = Writable.toWeb(proc.stdin!);
       const output = Readable.toWeb(proc.stdout!) as ReadableStream<Uint8Array>;
@@ -122,6 +153,12 @@ class AcpSession implements Session {
       let releasedPromiseResolve: () => void;
       const releasedPromise = new Promise<void>((r) => (releasedPromiseResolve = r));
       this.released = releasedPromiseResolve!;
+      proc.once("close", () => {
+        clearTimeout(startupTimer);
+        releasedPromiseResolve();
+        if (this.proc === proc) { this.active = null; this.client = undefined; this.conn = null; }
+        if (!ready) void fail(new Error("ACP connection closed"));
+      });
 
       const onPermission = async (
         req: acp.RequestPermissionRequest
@@ -147,6 +184,7 @@ class AcpSession implements Session {
             clientCapabilities: {}
           });
           const active = await ctx.buildSession(this.opts.cwd).start();
+          if (failing || this.closed) { active.dispose(); return; }
           this.active = active;
           this.client = ctx;
           this.configOptions = active.newSessionResponse.configOptions ?? [];
@@ -158,13 +196,12 @@ class AcpSession implements Session {
           const thought = this.thoughtOption();
           this.defaultEffortValue = thought?.options?.some((option: any) => option.value === "default") ? "default" : thought?.currentValue;
           this.nativeReasoning = active.newSessionResponse._meta?.haborReasoning as ReasoningCapabilities | undefined;
+          ready = true;
+          clearTimeout(startupTimer);
           resolveConnect(true);
           await releasedPromise; // 保活：直到 close()
         })
-        .catch((err) => {
-          this.active = null;
-          rejectConnect(err instanceof Error ? err : new Error(String(err)));
-        });
+        .catch(error => fail(error));
     });
   }
 
@@ -343,19 +380,15 @@ class AcpSession implements Session {
     yield { type: "done" as const, ...base, ts: Date.now() };
   }
 
-  cancel(): Promise<void> {
+  async cancel(): Promise<void> {
     // 简化：kill 连接进程即中止当前轮
-    if (this.proc) this.proc.kill("SIGKILL");
-    return Promise.resolve();
+    if (this.proc) await stopProcess(this.proc, "SIGKILL");
   }
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
     this.released?.();
     this.active?.dispose();
-    if (this.proc) {
-      this.proc.kill("SIGTERM");
-      setTimeout(() => this.proc?.kill("SIGKILL"), 2000).unref();
-    }
+    if (this.proc) await closeProcess(this.proc);
   }
 }

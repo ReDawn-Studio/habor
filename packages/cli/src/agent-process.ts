@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
+import { commandInvocation, stopProcess } from "@agent-router/core";
 
 export interface AgentCommand { command: string; args: string[]; cwd: string; env?: NodeJS.ProcessEnv }
 export interface RunOptions { signal?: AbortSignal; timeoutMs?: number; onOutput?: (line: string) => void; inherit?: boolean }
@@ -17,10 +18,12 @@ export async function runAgentCommand(spec: AgentCommand, options: RunOptions = 
   if (options.signal?.aborted) throw new Error("操作已取消");
   return new Promise((resolve, reject) => {
     const grouped = !options.inherit && process.platform !== "win32";
-    const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.env ?? process.env, shell: false, detached: grouped, stdio: options.inherit ? "inherit" : ["ignore", "pipe", "pipe"] });
+    const launch = commandInvocation(spec.command, spec.args);
+    const child = spawn(launch.command, launch.args, { cwd: spec.cwd, env: spec.env ?? process.env, shell: false, detached: grouped, stdio: options.inherit ? "inherit" : ["ignore", "pipe", "pipe"] });
     let output = "", stopped = "", killTimer: NodeJS.Timeout | undefined;
     const stop = (reason: string) => {
       stopped ||= reason;
+      if (process.platform === "win32") { void stopProcess(child); return; }
       const kill = (signal: NodeJS.Signals) => { try { if (grouped && child.pid) process.kill(-child.pid, signal); else child.kill(signal); } catch { /* Already exited. */ } };
       kill("SIGTERM"); killTimer ??= setTimeout(() => kill("SIGKILL"), 1500);
     };

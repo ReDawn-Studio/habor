@@ -9,14 +9,17 @@
  * session.events），但这里是长驻服务，Agent 跨多轮 prompt 存活。
  */
 import { createRequire } from "node:module";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { reasoningLabel, assertReasoningLevel, dshPackageAnchor, type AgentEvent, type ReasoningCapabilities } from "@agent-router/core";
 
 export interface DshRuntime {
   req: ReturnType<typeof createRequire>;
   ctx: any;
+  profileDir: string;
   dispose(): Promise<void>;
 }
 
@@ -30,57 +33,69 @@ export async function bootDsh(): Promise<DshRuntime> {
   const installAnchor = resolveDshInstall();
   if (!installAnchor) throw new Error("未找到 dsh 安装（DeepSeek Harness）。请先安装 dsh。");
   const req = createRequire(installAnchor);
-  const { boot, loadProfile, healProfilesModuleFallback } = req("@deepseek-ai/dsh-app-boot");
-  healProfilesModuleFallback(installAnchor);
-
-  const profile = loadProfile("dsh", "headless", installAnchor, void 0, { userLayer: true });
-  const base = profile.layers.find((l: any) => l.packageName === "@deepseek-ai/dsh-base");
-
-  // 组合：base bundle + 复刻 headless 的覆盖行（tools mode / persona / code-runtime），
-  // 但不要 headless 的 startup/runner（一次性执行者，与 ACP 长驻服务冲突）。
-  const patches: any[] = [
-    ...(base?.patches ?? []),
-    { id: "hmr", disabled: true },
-    ...(process.env.HABOR_DSH_BASE_URL ? [{ id: "agent-default-model", config: { provider: "habor-api", model: process.env.DSH_ACP_MODEL } }] : []),
-    { id: "tools", config: { mode: process.env.DSH_TOOLS_MODE } },
-    {
-      id: "system-prompt",
-      config: {
-        persona:
-          "You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}."
-      }
-    },
-    {
-      insert: [{ id: "code-runtime", name: "@deepseek-ai/dsh-code-runtime-worker-thread" }]
-    }
-  ];
-
-  const rootConfig = join(profile.dir, "cordis.yml");
-  writeFileSync(rootConfig, "[]\n");
-
-  const ctx = await boot("dsh", rootConfig, structuredClone(patches), (hostCtx: any) => {
-    hostCtx.provide("dsh:launch-environment", {});
-  });
-  await ctx.get("loader")?.await();
+  const { boot, loadProfile } = req("@deepseek-ai/dsh-app-boot");
+  // Generated profiles belong to this process, not to the user's DSH install.
+  // Keep DSH_HOME intact for native settings, credentials and session history.
+  // Resolve plugins from the selected installation instead of creating shared
+  // ~/.dsh/profiles/node_modules links (which race across versions/processes).
+  const runtimeHome = mkdtempSync(join(tmpdir(), "habor-dsh-runtime-"));
+  let ctx: any;
   let apiRoute: (() => void) | undefined;
-  if (process.env.HABOR_DSH_BASE_URL && process.env.HABOR_DSH_API_KEY) {
-    const { DeepSeekAdapter, resolveAdapterOptions } = req("@deepseek-ai/dsh-llm-deepseek");
-    const { getOrCreateAnonymousUserId } = req("@deepseek-ai/dsh-anonymous-user-id");
-    const connection = resolveAdapterOptions({ baseURL: process.env.HABOR_DSH_BASE_URL, apiKeyEnv: "HABOR_DSH_API_KEY", models: [{ id: process.env.DSH_ACP_MODEL }] });
-    apiRoute = ctx.get("llm").registerAdapter(["habor-api"], new DeepSeekAdapter({
-      options: () => connection, resolveApiKey: async () => process.env.HABOR_DSH_API_KEY!,
-      resolveUserId: getOrCreateAnonymousUserId, resolveAttachments: () => ctx.get("attachments")
-    }));
-  }
-
-  return {
-    req,
-    ctx,
-    async dispose() {
-      apiRoute?.();
-      await ctx.fiber?.dispose();
-    }
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) return;
+    disposed = true;
+    try { apiRoute?.(); await ctx?.fiber?.dispose(); }
+    finally { rmSync(runtimeHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
   };
+  try {
+    const profile = loadProfile("habor-dsh", "headless", installAnchor, runtimeHome, { userLayer: false });
+    const base = profile.layers.find((l: any) => l.packageName === "@deepseek-ai/dsh-base");
+    if (!base) throw new Error("DSH 安装缺少基础运行配置，请重新安装兼容版本");
+
+    // 组合：base bundle + 复刻 headless 的覆盖行（tools mode / persona / code-runtime），
+    // 但不要 headless 的 startup/runner（一次性执行者，与 ACP 长驻服务冲突）。
+    const patches: any[] = [
+      ...(base?.patches ?? []),
+      { id: "hmr", disabled: true },
+      ...(process.env.HABOR_DSH_BASE_URL ? [{ id: "agent-default-model", config: { provider: "habor-api", model: process.env.DSH_ACP_MODEL } }] : []),
+      { id: "tools", config: { mode: process.env.DSH_TOOLS_MODE } },
+      {
+        id: "system-prompt",
+        config: {
+          persona:
+            "You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}."
+        }
+      },
+      {
+        insert: [{ id: "code-runtime", name: "@deepseek-ai/dsh-code-runtime-worker-thread" }]
+      }
+    ];
+
+    const rootConfig = join(profile.dir, "cordis.yml");
+    writeFileSync(rootConfig, "[]\n");
+
+    ctx = await boot("habor-dsh", rootConfig, structuredClone(patches), (hostCtx: any) => {
+      hostCtx.provide("dsh:launch-environment", {});
+    }, pathToFileURL(installAnchor).href);
+    await ctx.get("loader")?.await();
+    if (process.env.HABOR_DSH_BASE_URL && process.env.HABOR_DSH_API_KEY) {
+      const { DeepSeekAdapter, resolveAdapterOptions } = req("@deepseek-ai/dsh-llm-deepseek");
+      const { getOrCreateAnonymousUserId } = req("@deepseek-ai/dsh-anonymous-user-id");
+      const connection = resolveAdapterOptions({ baseURL: process.env.HABOR_DSH_BASE_URL, apiKeyEnv: "HABOR_DSH_API_KEY", models: [{ id: process.env.DSH_ACP_MODEL }] });
+      apiRoute = ctx.get("llm").registerAdapter(["habor-api"], new DeepSeekAdapter({
+        options: () => connection, resolveApiKey: async () => process.env.HABOR_DSH_API_KEY!,
+        resolveUserId: getOrCreateAnonymousUserId, resolveAttachments: () => ctx.get("attachments")
+      }));
+    }
+
+    return {
+      req,
+      ctx,
+      profileDir: profile.dir,
+      dispose
+    };
+  } catch (error) { await dispose(); throw error; }
 }
 
 /** 用户可见模型名 → DSH provider model id（DSH 只认 id 小写形式）。 */

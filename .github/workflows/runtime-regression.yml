@@ -1,0 +1,40 @@
+name: Runtime regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      HABOR_STATE_DIR: ${{ runner.temp }}/habor-ci
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.22.2'
+          package-manager-cache: false
+      - name: Install package manager
+        run: npm install --global pnpm@11.22.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and test
+        run: pnpm test
+      - name: Install and verify the real compatible DSH runtime
+        run: node --input-type=module -e "const {AgentInstaller}=await import('./packages/cli/dist/agent-installer.js'); console.log(await new AgentInstaller().install('dsh-acp', {onOutput:console.log}));"
+      - name: Test concurrent runtime isolation
+        run: node packages/cli/test/dsh-runtime-isolation.mjs
+      - name: Test native settings and damaged profiles using a local API
+        run: node packages/cli/test/dsh-local-diagnostics.mjs

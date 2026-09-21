@@ -13,7 +13,7 @@
  */
 import { createInterface } from "node:readline";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAdapters } from "@agent-router/adapters";
 import { createRouter } from "@agent-router/router";
@@ -115,7 +115,7 @@ async function bye(): Promise<void> {
   byeOnce = true;
   if (process.env.HABOR_DEBUG_BLOCKS && tui) {
     try {
-      writeFileSync("/tmp/habor-blocks.json", JSON.stringify(tui.view.blocks.map(b=>({kind:b.kind, text:b.text.slice(0,200), meta:b.meta})), null, 1));
+      writeFileSync(join(tmpdir(), "habor-blocks.json"), JSON.stringify(tui.view.blocks.map(b=>({kind:b.kind, text:b.text.slice(0,200), meta:b.meta})), null, 1));
     } catch { /* ignore */ }
   }
   persist(true);
@@ -321,7 +321,7 @@ async function selectModel(model: string): Promise<void> {
     conversationMode = "fresh";
     tui?.setTask(task.id);
     tui?.setModel(model);
-    out(C.green(`✓ 已选择 ${model}，可以开始对话了。`));
+    out(C.green(`✓ 已选择 ${model}；发送消息时将检查连接。`));
   } else {
     await router.switchTaskModel(currentTaskId, model, { permission, reasoningEffort: effort });
     tui?.setModel(model);

@@ -14,7 +14,7 @@ function materialize(stage,version='1.2.3'){
   const dir=join(stage,'node_modules','@openai','codex');mkdirSync(dir,{recursive:true});
   writeFileSync(join(dir,'package.json'),JSON.stringify({name:'@openai/codex',version}));
   const bin=join(stage,'node_modules','.bin','codex');mkdirSync(dirname(bin),{recursive:true});
-  writeFileSync(bin,'#!/bin/sh\nexit 0\n',{mode:0o755});
+  writeFileSync(bin,'#!/usr/bin/env node\nprocess.exit(0);\n',{mode:0o755});
 }
 
 test('managed installation verifies a staged official package and keeps the working version after a failed upgrade',async()=>{
@@ -26,6 +26,7 @@ test('managed installation verifies a staged official package and keeps the work
         const stage=spec.args[spec.args.indexOf('--prefix')+1];materialize(stage);
         return{code:fail?1:0,output:fail?'mock network failure':''};
       }
+      if(spec.args.includes('--probe-agent'))return{code:0,output:'protocol ready'};
       assert.deepEqual(spec.args,['--version']);return{code:0,output:'1.2.3'};
     });
     assert.equal(await installer.install('codex-acp'),'1.2.3');
@@ -52,6 +53,30 @@ test('cancelled installation cannot activate a package and releases the installa
     await assert.rejects(installer.install('codex-acp',{signal:controller.signal}),/取消/);
     assert.equal(managedAgentExecutable('codex-acp',dir),undefined);
     assert.deepEqual(readdirSync(join(dir,'agents','codex-acp','versions')),[]);
+    assert.ok(!readdirSync(join(dir,'agents','codex-acp')).includes('install.lock'));
+  }finally{rmSync(dir,{recursive:true,force:true})}
+});
+
+test('a version-successful but protocol-broken upgrade never replaces the verified installation',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'habor-install-health-'));let broken=false;
+  try{
+    const installer=new AgentInstaller(dir,async(spec)=>{
+      if(spec.args.includes('install')){materialize(spec.cwd);return{code:0,output:''}}
+      if(spec.args.includes('--version'))return{code:0,output:'1.2.3'};
+      assert.ok(spec.args.includes('--probe-agent'));
+      assert.ok(spec.env.HABOR_CODEX_BIN.startsWith(spec.cwd.replace(/[\\/]\.habor-health$/,'')));
+      assert.ok(spec.env.CODEX_HOME.startsWith(spec.cwd));
+      assert.equal(spec.env.HABOR_DSH_API_KEY,'');
+      return{code:broken?1:0,output:broken?'runtime dependency is broken':'ready'};
+    });
+    await installer.install('codex-acp');
+    const activePath=join(dir,'agents','codex-acp','active.json');
+    const previous=readFileSync(activePath,'utf8');
+    assert.deepEqual(JSON.parse(previous).checks,['version','protocol-initialize']);
+    broken=true;
+    await assert.rejects(installer.install('codex-acp'),/启动检查失败.*尚未启用.*runtime dependency is broken/);
+    assert.equal(readFileSync(activePath,'utf8'),previous);
+    assert.equal(readdirSync(join(dir,'agents','codex-acp','versions')).length,1);
     assert.ok(!readdirSync(join(dir,'agents','codex-acp')).includes('install.lock'));
   }finally{rmSync(dir,{recursive:true,force:true})}
 });
@@ -111,7 +136,7 @@ test('DSH installation uses the validated bridge version while model selection r
 test('a negative native login report cannot be mistaken for a successful login from an exit code alone',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'habor-auth-state-')),old=process.env.HABOR_CODEX_BIN;
   try{
-    const bin=join(dir,'codex');writeFileSync(bin,'#!/bin/sh\necho "Not logged in"\nexit 0\n',{mode:0o755});
+    const bin=join(dir,'codex');writeFileSync(bin,'#!/usr/bin/env node\nconsole.log("Not logged in");\n',{mode:0o755});
     process.env.HABOR_CODEX_BIN=bin;
     assert.equal((await nativeAuthStatus('codex-acp',dir)).state,'signed-out');
     assert.equal((await nativeAuthStatus('kimi-acp',dir)).state,'unknown');

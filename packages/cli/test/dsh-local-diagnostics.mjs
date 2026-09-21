@@ -1,7 +1,7 @@
 // Real DSH, ordinary local settings/credential path, private mock API. No personal keys.
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdapters } from '../../adapters/dist/index.js';
@@ -31,6 +31,15 @@ await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const baseURL = `http://127.0.0.1:${server.address().port}/v1`;
 process.env.DSH_HOME = join(dir, 'dsh-home');
 mkdirSync(process.env.DSH_HOME, { mode:0o700 });
+// Reproduce a conflicting native dependency directory and a broken native
+// profile. Habor must leave both untouched while reusing settings/credentials.
+const nativeDependency = join(process.env.DSH_HOME, 'profiles', 'node_modules', 'send');
+mkdirSync(nativeDependency, { recursive:true });
+writeFileSync(join(nativeDependency, 'keep.txt'), 'native dependency: preserve me');
+const nativeProfile = join(process.env.DSH_HOME, 'profiles', 'headless');
+mkdirSync(nativeProfile, { recursive:true });
+writeFileSync(join(nativeProfile, 'package.json'), '{ deliberately invalid user profile');
+writeFileSync(join(nativeProfile, 'cordis.yml'), '# native configuration: preserve me');
 writeFileSync(join(process.env.DSH_HOME, 'settings.yaml'), JSON.stringify({
   'agent-default-model': { provider:'deepseek', model:'deepseek-v4-flash' },
   'llm-pi-ai': { providers:{ deepseek:{ baseURL, apiKeyEnv:'HABOR_DSH_LOCAL_TEST_KEY', api:'openai-completions', models:[{ id:'deepseek-v4-flash' }] } } }
@@ -57,7 +66,11 @@ try {
   assert.ok(next.some(event => event.type === 'message' && (event.delta ?? event.text).includes('Local DSH recovered')));
   assert.ok(requests.length >= 2 && requests.every(request => request.keyMatches && request.model === 'deepseek-v4-flash'));
   assert.ok(!JSON.stringify([...first,...next]).includes(key));
-  console.log('Local DSH passed: native settings and credentials, actual provider metadata, subscription diagnosis, repaint and next-turn recovery.');
+  assert.equal(lstatSync(nativeDependency).isSymbolicLink(), false);
+  assert.equal(readFileSync(join(nativeDependency, 'keep.txt'), 'utf8'), 'native dependency: preserve me');
+  assert.equal(readFileSync(join(nativeProfile, 'cordis.yml'), 'utf8'), '# native configuration: preserve me');
+  assert.equal(readFileSync(join(nativeProfile, 'package.json'), 'utf8'), '{ deliberately invalid user profile');
+  console.log('Local DSH passed: native settings/credentials preserved, conflicting profiles untouched, subscription diagnosis and next-turn recovery.');
 } finally {
   clearTimeout(timeout); await session.close();
   if (oldHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = oldHome;

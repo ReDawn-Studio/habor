@@ -35,6 +35,33 @@ pnpm habor
 # 本机已安装 habor 启动器时，也可直接运行 habor
 ```
 
+### Windows 原生运行
+
+安装 Node.js 22.19.0 或更新版本后，在 PowerShell 中进入仓库目录执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
+.\habor.cmd
+```
+
+首次脚本会安装仓库指定的 pnpm、依赖并编译；以后直接运行 `habor.cmd`。
+建议使用 Windows Terminal。启动器保留当前工作目录，所以也可以在其他项目目录中执行
+`D:\habor\habor.cmd`，让 Agent 在该项目中工作（按实际安装位置替换路径）。
+`pnpm habor` 同样可用，但会将工作目录切到 CLI 包目录；处理其他项目时使用 `habor.cmd`。
+
+Windows 支持从 PATH 检测原生 `.exe` 和 npm `.cmd` 客户端，并通过 Node.js 直接执行
+npm 脚本入口。无需 WSL 或 Git Bash。F5 可以安装 npm 分发的 Agent，具体平台支持仍取决于该 Agent 的官方安装包。
+F2 选择模型，F3 配置 API 来源，F5 管理客户端与登录。Codex / Kimi 等已安装客户端会自动检测。
+Windows 上的密钥文件继承所在用户目录的 ACL；`0600` 文件模式仅适用于 macOS / Linux。
+
+验证本机已安装的 Codex 或 Kimi（只连接本地模拟 API，不调用付费模型）：
+
+```powershell
+pnpm test
+node packages/cli/test/native-provider-http.mjs --agent=codex
+node packages/cli/test/native-provider-http.mjs --all --agent=kimi
+```
+
 交互终端使用统一的深灰主题、暖色强调和自适应布局。输入 `/` 即时打开命令菜单；
 启动后会自动打开模型选择面板，直接按 ↑↓ 选择、Enter 确认，无需输入模型名称。
 `/model`、`/models` 或 F2 随时打开面板，默认定位当前模型；输入文字可筛选，Esc 返回。
@@ -143,20 +170,24 @@ F2 保留所有已配置的模型，未检测到客户端时显示“待安装�
 
 **F5 / `/agents`** 管理 Agent，**`/login`** 管理当前 Agent 的认证：
 
-- 自动安装支持 macOS / Linux 的 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code；Grok Build 通过官方 shell 安装入口管理。使用官方来源；安装前显示动作与目标目录。
+- 自动安装使用 Codex、Claude Code、Kimi Code、DeepSeek Harness、Gemini CLI、Qwen Code 的官方 npm 分发，支持 macOS / Linux / Windows（以各安装包支持的平台为准）；Grok Build 通过官方 shell 安装入口管理。使用官方来源；安装前显示动作与目标目录。
 - Codex / Claude / Kimi 使用官方 npm `latest`；DSH 自建桥接固定在已验证的 `0.1.0-rc.8`。实测 `0.1.5-rc.1` 虽可安装，但现有桥接无法完成 ACP 连接，因此暂不启用。Agent 程序版本和模型版本独立，兼容版本仍可调用 V4.1 Flash。
 - DSH 显式安装已验证的 peer 依赖集合，再使用 `--legacy-peer-deps` 避开 npm 的循环 peer 解析；并非只跳过所需依赖。
-- 包下载到 `~/.habor/agents/<adapter>/versions/<installation-id>`，通过包标识与可执行文件版本检查后，原子更新 `active.json`。失败或取消不会切换到半安装版本；旧版本留存。
+- 包下载到 `~/.habor/agents/<adapter>/versions/<installation-id>`。包标识和版本检查后，DSH / Codex / Kimi 还会启动该暂存版本，完成离线协议握手；全部通过才原子更新 `active.json`。检查失败或取消会保留旧版本。其他客户端目前只验证版本，检查范围记入 `active.json` 的 `checks`，不把版本通过当成对话可用。
 - npm 使用 `~/.habor/npm-cache`，避免系统 npm 缓存的权限问题；不需要对原有 npm 目录执行 `sudo chown`。
 - 优先级为用户显式指定的客户端路径、habor 托管版本、PATH 中的客户端。托管安装不改系统全局安装，不需要管理员权限，也无需重启。显式路径覆盖仍优先时界面会提示。
 - Codex 提供浏览器登录与设备码；Claude 提供原生账号登录；Kimi 提供原生设备码；DSH 可打开 Web 配置；ZCode 可打开官方应用认证。
 - 登录阶段临时将终端交给官方客户端。验证码、浏览器授权和输入由客户端处理，凭据由其保存与刷新；退出或 Ctrl+C 后恢复 habor 的界面和草稿。认证输出不进入任务历史。
 - 官方 API Key 直接进入预填地址的隐藏输入表单；自定义来源可填写 URL、Key 和模型，并明确选择执行 Agent。已保存的 API 来源无需再进行订阅登录。
 - 登录状态仅在原生客户端明确报告时显示“已认证”；安装成功、配置文件存在或启动桌面软件都不等于认证成功。账号额度与具体模型权限在连接时验证。
+- DSH 的生成配置使用每个进程独立的临时目录，插件直接从当前选定的安装版本加载；habor 不再修改 `~/.dsh/profiles/node_modules` 或覆盖原生 `cordis.yml`。原生 `DSH_HOME` 的设置、凭据和会话记录继续由 DSH 管理。正常退出会清理临时配置；强制终止遗留的临时目录不会被后续启动复用。
+- ACP 启动 / 建立会话最多等待 30 秒，失败后回收进程并允许重试；错误保留客户端名称、退出码和脱敏后的诊断信息。
+
+这类安装成功但启动失败的问题、隔离边界和回归测试见 [运行可靠性说明](docs/runtime-reliability.md)。
 - Gemini CLI / Qwen Code / Grok Build 位于 F2 的 ACP 模型列表和 F5 的 Agent 管理中。认证仍由原生 CLI 完成，提示、工具事件、取消和任务上下文统一回到 habor。
 
 ZCode 没有在本项目中核实可用于自动安装的官方 npm 分发，继续提供官方桌面安装入口。
-Windows 原生自动安装尚未实现，可使用 WSL 或官方安装页。外部安装改变 PATH 后需重启 habor；`/refresh` 可重新检测当前环境。
+Windows 支持 npm 客户端的原生自动安装；没有 Windows 分发的客户端可使用官方安装页或 WSL。外部安装改变 PATH 后需重启 habor；`/refresh` 可重新检测当前环境。
 
 官方安装说明：[Codex CLI](https://learn.chatgpt.com/docs/codex/cli)、
 [Claude Code](https://code.claude.com/docs/en/setup)、

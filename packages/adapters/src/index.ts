@@ -18,6 +18,7 @@ export { createCliAdapter, type CliAgentSpec } from "./framework.js";
 export type { CliRunContext, Emit, CliExitContext } from "./framework.js";
 export { createAcpAdapter, type AcpAgentSpec } from "./acp.js";
 export { createAcpBridgeAdapter } from "./acp-bridge.js";
+export { probeAgentProtocol, type AgentProtocol } from "./health.js";
 export { ZcodeStreamAdapter } from "./zcode-stream.js";
 
 /**

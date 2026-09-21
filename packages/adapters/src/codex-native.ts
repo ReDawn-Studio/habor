@@ -65,7 +65,7 @@ class CodexSession implements Session {
       this.reasoning = { source: "native", defaultId: model.defaultReasoningEffort,
         levels: model.supportedReasoningEfforts.filter((item: any) => typeof item.reasoningEffort === "string").map((item: any) => ({ id: item.reasoningEffort, label: reasoningLabel(item.reasoningEffort), description: item.description })) };
       return this.reasoning!;
-    } finally { if (rpc && !activeRpc) rpc.close(); }
+    } finally { if (rpc && !activeRpc) await rpc.close(); }
   }
   async setReasoningEffort(effort: string | undefined): Promise<void> {
     assertReasoningLevel(await this.getReasoningCapabilities(), effort);
@@ -144,7 +144,7 @@ class CodexSession implements Session {
     if (this.rpc && this.threadId && this.turnId) await this.rpc.request("turn/interrupt", { threadId: this.threadId, turnId: this.turnId }, 2000).catch(() => {});
     this.queue?.finish();
   }
-  async close(): Promise<void> { this.closing = true; this.queue?.finish(); this.rpc?.close(); this.rpc = undefined; }
+  async close(): Promise<void> { this.closing = true; this.queue?.finish(); await this.rpc?.close(); this.rpc = undefined; }
 }
 export class CodexNativeAdapter implements Adapter {
   readonly id = "codex-acp";
