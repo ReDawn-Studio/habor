@@ -31,5 +31,5 @@ export class Terminal {
   on(event: string, listener: (...args: any[]) => void): void;
   off(event: string, listener: (...args: any[]) => void): void;
   requestClipboard(): void;
-  copyToClipboard(text: string): void;
+  copyToClipboard(text: string): Promise<boolean>;
 }

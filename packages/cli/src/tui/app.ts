@@ -10,6 +10,7 @@ import { AgentSetupPanel } from "./agent-setup-panel.js";
 import { WorkspaceTrustPanel } from "./trust-panel.js";
 import { ResumePanel, type ResumeCandidate } from "./resume-panel.js";
 import type { AuthMethod, AuthStatus } from "../agent-auth.js";
+import { TranscriptSelection } from "./transcript-selection.js";
 
 export const THEME = {
   primary: "d99a78", secondary: "c6b5ff", accent: "a5bdf7",
@@ -37,7 +38,7 @@ type Segment = { text: string; style: any };
 type Row = { segments: Segment[]; indent?: number; bg?: string };
 export interface Key {
   name?: string; ctrl?: boolean; alt?: boolean; shift?: boolean; text?: string; data?: Buffer;
-  mouse?: { action: string };
+  mouse?: { action: string; x?: number; y?: number; button?: string };
 }
 export interface AppViewOptions {
   terminal: { cols: number; rows: number; paint(screen: Screen): void; copyToClipboard?(text: string): unknown };
@@ -101,14 +102,23 @@ export class AppView {
   private noticeUntil = 0;
   private maxScroll = 0;
   private transcriptH = 1;
+  private selection: TranscriptSelection | null = null;
+  private selectionRows: Row[] | null = null;
+  private selectionSize = "";
+  private selectionWasAtBottom = true;
+  private transcriptRows: Row[] = [];
+  private transcriptLeft = 0;
+  private transcriptTop = 3;
+  private dragPointer?: { x: number; y: number };
   private cache = new WeakMap<Block, { key: string; rows: Row[] }>();
 
   constructor(private opts: AppViewOptions) {}
   get input(): string { return this.editor.text; }
   set input(text: string) { this.editor.set(text); }
   setModel(model: string | null): void { if (this.model !== model) this.connectionSummary = ""; this.model = model; this.statusText = ""; this.paint(); }
-  setTask(taskId: string | null): void { if (this.taskId !== taskId) this.connectionSummary = ""; this.taskId = taskId; this.paint(); }
+  setTask(taskId: string | null): void { if (this.taskId !== taskId) { this.clearSelection(); this.connectionSummary = ""; } this.taskId = taskId; this.paint(); }
   setConversation(turns: Array<{ role: string; text: string }>): void {
+    this.clearSelection();
     this.blocks = turns.filter(turn => turn.text).map(turn => ({
       kind: turn.role === "user" ? "user" : turn.role === "assistant" ? "assistant" : turn.role === "tool" ? "tool" : "system",
       text: turn.text,
@@ -135,7 +145,7 @@ export class AppView {
     } else this.blocks.push(block);
     this.paint();
   }
-  clearMessages(): void { this.blocks = []; this.connectionSummary = ""; this.scroll = 0; this.atBottom = true; this.paint(); }
+  clearMessages(): void { this.clearSelection(); this.blocks = []; this.connectionSummary = ""; this.scroll = 0; this.atBottom = true; this.paint(); }
   setInput(text: string): void { this.editor.set(text); this.refreshSuggestions(); this.paint(); }
   openModels(): void {
     if (this.modelPicker) return;
@@ -316,6 +326,9 @@ export class AppView {
   }
   notify(text: string): void { this.notice = text; this.noticeUntil = Date.now() + 3500; this.paint(); }
   tick(): void {
+    if (this.selection?.dragging && this.dragPointer && (this.dragPointer.y < this.transcriptTop || this.dragPointer.y >= this.transcriptTop + this.transcriptH)) {
+      this.extendSelection(this.dragPointer.x, this.dragPointer.y); this.paint();
+    }
     if (this.status === "running" || this.agentSetupPanel?.busy) { this.spinnerT++; this.paint(); }
     else if ((this.notice && Date.now() > this.noticeUntil) || (this.exitUntil && Date.now() > this.exitUntil)) {
       this.notice = ""; this.exitUntil = 0; this.paint();
@@ -330,6 +343,63 @@ export class AppView {
     this.atBottom = this.scroll === this.maxScroll;
     this.paint();
   }
+  private clearSelection(): void { this.selection = null; this.selectionRows = null; this.dragPointer = undefined; }
+  private async copyText(text: string, label: string): Promise<void> {
+    if (!text.trim()) return;
+    try {
+      if (!this.opts.terminal.copyToClipboard) throw new Error("Clipboard unavailable");
+      const copied = await this.opts.terminal.copyToClipboard(text);
+      this.notify(copied === false ? "复制失败，请使用终端原生选择复制" : label);
+    } catch { this.notify("复制失败，请使用终端原生选择复制"); }
+  }
+  private extendSelection(x: number, y: number): void {
+    if (!this.selection) return;
+    if (y < this.transcriptTop) this.scroll = Math.max(0, this.scroll - 1);
+    else if (y >= this.transcriptTop + this.transcriptH) this.scroll = Math.min(this.maxScroll, this.scroll + 1);
+    this.selection.extend({ col: x - this.transcriptLeft, row: this.scroll + Math.max(0, Math.min(this.transcriptH - 1, y - this.transcriptTop)) });
+  }
+  private handleTranscriptMouse(mouse: NonNullable<Key["mouse"]>): void {
+    if (mouse.action === "wheel-up" || mouse.action === "wheel-down") {
+      this.scrollBy(mouse.action === "wheel-up" ? -3 : 3);
+      if (this.selection) this.atBottom = false;
+      if (this.selection?.dragging && mouse.x !== undefined && mouse.y !== undefined) {
+        this.selection.extend({ col: mouse.x - this.transcriptLeft, row: this.scroll + Math.max(0, Math.min(this.transcriptH - 1, mouse.y - this.transcriptTop)) }); this.paint();
+      }
+      return;
+    }
+    if (mouse.button === "right" && mouse.action === "down") {
+      if (this.selection) void this.copyText(this.selection.text(), "已复制选中文本 · Esc 取消选择");
+      return;
+    }
+    const { x, y } = mouse;
+    if (x === undefined || y === undefined) return;
+    if (mouse.action === "down" && mouse.button === "left") {
+      const wasAtBottom = this.selection ? this.selectionWasAtBottom : this.atBottom;
+      this.clearSelection();
+      const row = this.scroll + y - this.transcriptTop;
+      if (x >= this.transcriptLeft && x < this.transcriptLeft + this.contentWidth() && y >= this.transcriptTop && y < this.transcriptTop + this.transcriptH && row < this.transcriptRows.length) {
+        this.selectionRows = this.transcriptRows;
+        this.selection = new TranscriptSelection(this.selectionRows.map(row => " ".repeat(row.indent ?? 0) + row.segments.map(segment => segment.text).join("")), this.contentWidth(), { row, col: x - this.transcriptLeft });
+        this.selectionSize = `${this.opts.terminal.cols}:${this.opts.terminal.rows}`;
+        this.selectionWasAtBottom = wasAtBottom;
+        this.dragPointer = { x, y };
+        this.atBottom = false;
+      }
+      this.paint(); return;
+    }
+    if (this.selection?.dragging && (mouse.action === "move" || mouse.action === "up")) {
+      if (mouse.button !== "left" && mouse.button !== "none") return;
+      this.dragPointer = { x, y };
+      this.extendSelection(x, y);
+      if (mouse.action === "up") {
+        this.selection.dragging = false; this.dragPointer = undefined;
+        const text = this.selection.text();
+        if (text.trim()) void this.copyText(text, "已复制选中文本 · 右键 / Ctrl+C 再次复制 · Esc 取消选择");
+        else { this.atBottom = this.selectionWasAtBottom; this.clearSelection(); }
+      }
+      this.paint();
+    }
+  }
   handleKey(key: Key): boolean {
     const k = key.name;
     if (this.trustPanel) { this.trustPanel.handle(key); return true; }
@@ -343,15 +413,16 @@ export class AppView {
     if (this.modelPicker) return this.handleModelKey(key);
     if (k === "f2") { this.openModels(); return true; }
     if (k === "mouse") {
-      if (key.mouse?.action === "wheel-up") this.scrollBy(-3);
-      if (key.mouse?.action === "wheel-down") this.scrollBy(3);
+      if (key.mouse) this.handleTranscriptMouse(key.mouse);
       return true;
     }
+    if (this.selection && key.ctrl && (k === "c" || k === "y")) { void this.copyText(this.selection.text(), "已复制选中文本 · Esc 取消选择"); return true; }
+    if (this.selection && k === "escape") { this.clearSelection(); this.paint(); return true; }
     if (k === "pageup" || k === "pagedown") { this.scrollBy((k === "pageup" ? -1 : 1) * Math.max(1, this.transcriptH - 2)); return true; }
-    if (key.ctrl && k === "o") { this.showDetails = !this.showDetails; this.paint(); return true; }
+    if (key.ctrl && k === "o") { this.clearSelection(); this.showDetails = !this.showDetails; this.paint(); return true; }
     if (key.ctrl && k === "y") {
       const answer = this.blocks.filter(b => b.kind === "assistant").at(-1);
-      if (answer) { this.opts.terminal.copyToClipboard?.(answer.text); this.notify("已复制最近一段回复"); }
+      if (answer) void this.copyText(answer.text, "已复制最近一段回复");
       return true;
     }
     if (key.ctrl && k === "c") {
@@ -368,6 +439,7 @@ export class AppView {
       else if (!this.atBottom) { this.scroll = this.maxScroll; this.atBottom = true; this.paint(); }
       return true;
     }
+    if (k === "paste" || k === "clipboard" || k === "return" || k === "enter" || key.text) this.clearSelection();
     if (k === "paste" || k === "clipboard") {
       if (key.data) this.editor.insert(key.data.toString("utf8"));
     } else if (k === "tab" || k === "shift-tab") {
@@ -483,6 +555,7 @@ export class AppView {
   }
   paint(): void {
     const { cols, rows } = this.opts.terminal;
+    if (this.selection && (this.selectionSize !== `${cols}:${rows}` || this.modelPicker || this.providerPanel || this.agentSetupPanel || this.trustPanel || this.resumePanel || this.reasoningPicker)) this.clearSelection();
     if (cols < 20 || rows < 10) {
       const screen = new Screen(cols, rows);
       screen.text(0, 0, truncateWidth("请放大终端窗口", cols), makeStyle({ fg: THEME.textMuted }));
@@ -506,9 +579,10 @@ export class AppView {
     if (width > 40) write(0, `v${this.opts.version}  /  ${basename(this.opts.cwd ?? process.cwd())}`, THEME.textMuted, left + 10, width - 10);
     write(1, "─".repeat(width), THEME.border);
 
-    const transcript = this.blocks.flatMap(block => this.blockRows(block, width));
+    const transcript = this.selectionRows ?? this.blocks.flatMap(block => this.blockRows(block, width));
+    this.transcriptRows = transcript; this.transcriptLeft = left; this.transcriptTop = transcriptTop;
     this.maxScroll = Math.max(0, transcript.length - this.transcriptH);
-    this.scroll = this.atBottom ? this.maxScroll : Math.min(this.scroll, this.maxScroll);
+    this.scroll = this.atBottom && !this.selection ? this.maxScroll : Math.min(this.scroll, this.maxScroll);
     if (transcript.length === 0) {
       const logo = ["██████╗  █████╗ ██████╗  ██████╗ ██████╗", "██╔══██╗██╔══██╗██╔══██╗██╔═══██╗██╔══██╗", "██████╔╝███████║██████╔╝██║   ██║██████╔╝", "██╔══██╗██╔══██║██╔══██╗██║   ██║██╔══██╗", "██████╔╝██║  ██║██████╔╝╚██████╔╝██║  ██║"];
       const welcome: [string, string, boolean?][] = [
@@ -526,6 +600,11 @@ export class AppView {
         for (const segment of row.segments) {
           const clipped = truncateWidth(segment.text, Math.max(0, left + width - x));
           x = screen.text(x, y, clipped, { ...segment.style, bg: segment.style.bg ?? row.bg ?? null });
+        }
+        const selection = this.selection?.range(this.scroll + i);
+        if (selection) for (let col = selection.start; col < Math.min(width, selection.end); col++) {
+          const cell = screen.cells[y][left + col];
+          cell.style = { ...cell.style, fg: THEME.background, bg: THEME.accent };
         }
       });
     }
@@ -563,7 +642,7 @@ export class AppView {
     const statusLeft = `${model}  ·  ${reasoningLabel(this.reasoningEffort)}  ·  ${status}`;
     write(rows - 2, statusLeft, running ? THEME.warning : THEME.textMuted);
     if (usage && width - displayWidth(statusLeft) > displayWidth(usage) + 3) write(rows - 2, usage, THEME.textMuted, left + width - displayWidth(usage), displayWidth(usage));
-    const hint = Date.now() < this.noticeUntil ? this.notice : running ? "Esc / Ctrl+C 停止 · 可编辑草稿 · PgUp/PgDn 浏览" : this.suggestions !== null ? "↑↓ 选择 · Enter 确认 · Tab 补全 · Esc 收起" : width < 65 ? "F2 模型 · F3 来源 · F4 思考 · F5 Agent" : "Enter 发送 · Alt+Enter 换行 · F2 模型 · F3 来源 · F4 思考 · F5 Agent";
+    const hint = Date.now() < this.noticeUntil ? this.notice : this.selection ? this.selection.dragging ? "拖动选择 · 松开鼠标复制 · 拖到上下边缘滚动" : "选区已固定 · 右键 / Ctrl+C 复制 · Esc 取消选择" : running ? "Esc / Ctrl+C 停止 · 鼠标拖选复制 · PgUp/PgDn 浏览" : this.suggestions !== null ? "↑↓ 选择 · Enter 确认 · Tab 补全 · Esc 收起" : width < 65 ? "拖选复制 · F2 模型 · F3 来源 · F4 思考" : "拖选复制 · Enter 发送 · Alt+Enter 换行 · F2 模型 · F3 来源 · F4 思考 · F5 Agent";
     write(rows - 1, hint, THEME.textMuted);
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;

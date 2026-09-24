@@ -206,12 +206,14 @@ const HELP = `habor — 原生 Agent 聚合平台
   ↑↓                    历史输入 / 多行移动
   PgUp / PgDn             浏览对话；Esc 回到底部
   Ctrl+O                展开或折叠思考与工具输出
-  Ctrl+Y                复制最近一段回复
+  鼠标左键拖选          高亮输出，松开后自动复制；右键可再次复制
+  Ctrl+Y                复制选中文本；无选区时复制最近一段回复
   Ctrl+L                清空屏幕
   Esc / Ctrl+C          停止当前回复，保留会话界面
   Ctrl+C                清空草稿；空草稿下连按两次退出
 运行时可以继续编辑草稿，结束后按 Enter 发送。
-全屏 TUI 默认接管滚轮；HABOR_MOUSE_SCROLL=0 时恢复终端原生滚轮和拖选，回复也可以用 Ctrl+Y 复制。`;
+全屏 TUI 支持滚轮浏览和鼠标拖选复制；有选区时 Ctrl+C 复制、Esc 取消选区。
+HABOR_MOUSE_SCROLL=0 时改用终端原生选择；macOS 用 pbcopy 写入系统剪贴板，SSH 使用终端的 OSC 52。`;
 
 // —— 模型选择 ——
 

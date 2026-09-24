@@ -3,7 +3,7 @@
 // Terminal engine: raw-mode input, alternate screen, a diffing cell buffer,
 // and ANSI truecolor rendering. Zero dependencies; works on any VT-capable
 // terminal (Windows Terminal, ConPTY, iTerm2, GNOME Terminal, ...).
-import { spawn } from 'node:child_process'
+import { writeClipboard } from '../clipboard.js'
 import { EventEmitter } from 'node:events'
 import { runeWidth, graphemes } from './util.js'
 
@@ -372,14 +372,12 @@ export class Terminal extends EventEmitter {
     }
     this.input.on('data', this._onData)
     this.output.on('resize', this._onResize)
-    // A full-screen TUI must own the wheel or the host terminal scrolls its
-    // outer scrollback instead of the transcript.  Native selection remains
-    // available with Option-drag on terminals that support it; set
-    // HABOR_MOUSE_SCROLL=0 when the host's drag-selection behaviour is more
-    // important than wheel scrolling.  Clear both the alternate screen and
-    // its scroll position so a launch after terminal scrolling starts at row 1.
-    const mouse = process.env.HABOR_MOUSE_SCROLL === '0' ? '' : '\x1b[?1000h\x1b[?1006h'
-    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l' + mouse + '\x1b[?2004h\x1b[3J\x1b[2J\x1b[H')
+    // Button-motion reporting delivers drag coordinates as well as wheel events.
+    // The view implements selection, so users can copy without giving up scrolling.
+    const mouse = process.env.HABOR_MOUSE_SCROLL === '0'
+      ? '\x1b[?1000l\x1b[?1002l\x1b[?1006l'
+      : '\x1b[?1000h\x1b[?1002h\x1b[?1006h'
+    this.write('\x1b[?1049h\x1b[?7l\x1b[?25l' + mouse + '\x1b[?2004h\x1b[2J\x1b[H')
     this.raw = true
   }
 
@@ -395,7 +393,7 @@ export class Terminal extends EventEmitter {
       this.input.pause()
     }
     // Disable bracketed paste + mouse tracking, show cursor, reset.
-    this.write('\x1b[?2004l\x1b[?1006l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l')
+    this.write('\x1b[?2004l\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[0m\x1b[?1049l')
     this.raw = false
   }
 
@@ -410,38 +408,15 @@ export class Terminal extends EventEmitter {
     this.write('\x1b]52;c;?\x1b\\')
   }
 
-  // Write text to the system clipboard. Primary path: an OSC 52 write, which
-  // Windows Terminal, iTerm2, and most modern terminals honor. On Windows a
-  // PowerShell fallback covers hosts that drop OSC 52 — the fallback
-  // round-trips the text through base64 so UTF-8 (CJK, emoji) survives, unlike
-  // `clip.exe`, which re-decodes stdin with the console's ANSI/OEM code page
-  // and mangles non-ASCII. Both paths write the same UTF-8 text, so whichever
-  // lands last leaves the clipboard correct. Best-effort: never throws.
+  // Serialize copies so a slower clipboard subprocess cannot overwrite a newer selection.
   copyToClipboard(text) {
-    if (typeof text !== 'string' || text.length === 0) return false
-    let written = false
-    try {
-      this.write('\x1b]52;c;' + Buffer.from(text, 'utf8').toString('base64') + '\x1b\\')
-      written = true
-    } catch { /* output unavailable */ }
-    if (process.platform === 'win32' && this.output?.isTTY) {
-      try {
-        const b64 = Buffer.from(text, 'utf8').toString('base64')
-        // System.Windows.Forms.Clipboard needs an STA thread; powershell.exe
-        // honors -STA. The base64 argument is ASCII-only, so it passes through
-        // CreateProcess and -Command untouched (no shell re-quoting).
-        const script =
-          'Add-Type -AssemblyName System.Windows.Forms;' +
-          '[System.Windows.Forms.Clipboard]::SetText([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String(\'' + b64 + '\')))'
-        const child = spawn('powershell.exe', ['-STA', '-NoProfile', '-NonInteractive', '-Command', script], {
-          stdio: 'ignore',
-          windowsHide: true,
-        })
-        child.on('error', () => { /* no PowerShell available */ })
-        written = true
-      } catch { /* spawn failure — OSC 52 may still have succeeded */ }
-    }
-    return written
+    this._clipboard = (this._clipboard ?? Promise.resolve()).catch(() => false).then(() =>
+      writeClipboard(text, { write: sequence => {
+        if (!this.started) throw new Error('Terminal is no longer active')
+        this.write(sequence)
+      } })
+    )
+    return this._clipboard
   }
 
   _handleData(chunk) {
