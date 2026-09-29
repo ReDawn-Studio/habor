@@ -22,7 +22,7 @@ export interface TuiControllerOptions {
   onInstallAgent?: (model: string, onOutput: (line: string) => void, signal: AbortSignal) => Promise<string>;
   onLoginAgent?: (model: string, method: AuthMethod) => Promise<AuthStatus>;
   onInspectAgentAuth?: (model: string) => Promise<AuthStatus>;
-  /** 工作区信任：选择模型前确认当前目录可信 */
+  /** 工作区信任：进入未信任目录时确认当前目录可信 */
   onCheckWorkspaceTrust?: () => Promise<boolean> | boolean;
   onTrustWorkspace?: () => Promise<void>;
   onWorkspaceTrustDenied?: () => void;

@@ -722,9 +722,11 @@ async function main(): Promise<void> {
     process.once("exit", () => tui?.stop());
     process.once("SIGTERM", bye);
     process.once("SIGHUP", bye);
+    // Entering habor is the trust boundary: ask before probing or selecting a model.
+    if (!workspaceTrust.isTrusted(cwd)) tui.view.openWorkspaceTrust();
     await refreshConnections();
     const preferred = providers.preferredModel(registry.listModels().filter(entry => availableModels!.includes(entry.model)));
-    // 未信任目录不自动恢复连接：信任确认在用户选择模型时弹出。
+    // 未信任目录不自动恢复连接：启动时先完成信任确认。
     if (workspaceTrust.isTrusted(cwd) && preferred && !tui.view.input && !tui.view.blocks.length && !tui.view.providerPanel && !tui.view.modelPicker && !tui.view.agentSetupPanel) {
       try { await selectModel(preferred.model); }
       catch (error) { out(`恢复上次连接失败：${error instanceof Error ? error.message : String(error)} · 按 F2 重新选择`); }

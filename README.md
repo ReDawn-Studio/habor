@@ -94,7 +94,7 @@ F2 打开面板时会保留原有草稿和光标位置。
 macOS 使用 `pbcopy`，Windows 使用 PowerShell，Linux 尝试 `wl-copy` / `xclip` / `xsel`；SSH 或本地工具不可用时通过终端的 OSC 52 写入剪贴板（需要终端支持）。
 设置 `HABOR_MOUSE_SCROLL=0` 可使用终端原生拖选与 Cmd+C / Ctrl+Shift+C，内部浏览仍可使用 PgUp / PgDn。
 
-首次选择模型进入一个未信任的目录时，会显示工作区信任确认。选择“是，继续”后才会创建 Agent 任务；选择“否，退出”会退出 habor。
+进入一个未信任的目录时，启动 habor 就会显示工作区信任确认。选择“是，继续”后才可选择模型并创建 Agent 任务；选择“否，退出”会退出 habor。
 确认记录保存在 `~/.habor/trust.json`，按工作区目录分别保存；也可以使用 `/trust` 再次打开确认面板。
 
 普通输入默认创建新的会话；历史任务按工作目录隔离。`/tasks` 只列出 habor 当前任务，`/resume` 打开当前目录的统一历史面板，其中包含 habor、Codex、Claude Code、Kimi Code 的官方会话；恢复后会把官方历史导入当前模型上下文。其他目录的任务不会显示或被恢复。

@@ -36,10 +36,13 @@ with tempfile.TemporaryDirectory(prefix='habor-pty-') as state:
                             stdin=slave, stdout=slave, stderr=slave,
                             env={**os.environ, 'TERM': 'xterm-256color', 'HABOR_STATE_DIR': state})
     try:
-        Path(state, 'trust.json').write_text(json.dumps({'version': 1, 'paths': [str(root.resolve())]}))
         read_for(2)
         assert b'\x1b[?1049h' in captured, 'alternate screen did not start'
         assert b'habor' in captured, 'welcome screen was not rendered'
+        assert b'Do you trust the files in this folder?' in captured, 'startup trust prompt did not appear'
+        os.write(master, b'\r')
+        read_for(0.5)
+        assert Path(state, 'trust.json').exists(), 'startup trust decision was not persisted'
         assert b'Ask your question' in captured, 'welcome composer did not appear'
         # Open F2 from the welcome screen; built-in DSH adapters create sessions lazily.
         os.write(master, b'\x1bOQ')
