@@ -177,6 +177,36 @@ test('stream projection preserves order, matches parallel tools and avoids cumul
   view.handleKey({ name: 'o', ctrl: true }); assert.match(text(), /check this and that/);
 });
 
+test('tool rows expose the tool name and measured duration', () => {
+  const { view, text } = setup();
+  const stream = new TurnEvents(view);
+  stream.accept({ type: 'tool_call', tool: { id: 'timed', name: 'Shell', input: { command: 'pnpm test' } } });
+  stream.accept({ type: 'tool_result', toolResult: { id: 'timed', name: 'Shell', output: 'ok' } });
+  const block = view.blocks.find(b => b.meta?.id === 'timed');
+  assert.equal(block.meta.status, 'done');
+  assert.equal(typeof block.meta.durationMs, 'number');
+  assert.match(text(), /Shell/);
+  assert.match(text(), /pnpm test/);
+});
+
+test('ask mode presents an approval panel and resolves the selected decision', async () => {
+  const { view, text } = setup();
+  assert.match(text(), /AUTO/);
+  view.permission = 'ask';
+  view.paint();
+  assert.match(text(), /ASK/);
+  const pending = view.openPermission({ id: 'permission-1', toolName: 'Shell', description: 'Run pnpm test in this workspace', options: [
+    { id: 'allow_once', name: 'Allow once' }, { id: 'deny', name: 'Deny' }
+  ] });
+  assert.ok(view.permissionPanel);
+  assert.match(text(), /需要你的确认/);
+  assert.match(text(), /Run pnpm test/);
+  view.handleKey({ name: 'down' });
+  view.handleKey({ name: 'return' });
+  assert.deepEqual(await pending, { allow: false, message: 'Deny' });
+  assert.equal(view.permissionPanel, null);
+});
+
 test('markdown wrapping preserves code indentation, wide text and headings at narrow widths', () => {
   for (const width of [1, 8, 24, 76]) {
     const lines = renderMarkdown('# 标题'.repeat(12) + '\n```ts\n    const result = "你好👋";\n```', THEME, width);

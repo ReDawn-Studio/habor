@@ -11,6 +11,8 @@ import { WorkspaceTrustPanel } from "./trust-panel.js";
 import { ResumePanel, type ResumeCandidate } from "./resume-panel.js";
 import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 import { TranscriptSelection } from "./transcript-selection.js";
+import { PermissionPanel } from "./permission-panel.js";
+import type { PermissionDecision, PermissionRequest } from "@agent-router/core";
 
 export const THEME = {
   primary: "d99a78", secondary: "c6b5ff", accent: "a5bdf7",
@@ -32,7 +34,7 @@ export type BlockKind = "user" | "assistant" | "tool" | "thinking" | "usage" | "
 export interface Block {
   kind: BlockKind;
   text: string;
-  meta?: { id?: string; name?: string; status?: string; delta?: string; input?: string };
+  meta?: { id?: string; name?: string; status?: string; delta?: string; input?: string; durationMs?: number; startedAt?: number };
 }
 type Segment = { text: string; style: any };
 type Row = { segments: Segment[]; indent?: number; bg?: string };
@@ -83,6 +85,7 @@ export class AppView {
   modelInfo: Record<string, { source: SourceKind; agent: string; modelId: string; adapterId?: string; installed?: boolean; nativeTerminalOnly?: boolean; protocol?: "acp" }> = {};
   agentSetupPanel: AgentSetupPanel | null = null;
   trustPanel: WorkspaceTrustPanel | null = null;
+  permissionPanel: PermissionPanel | null = null;
   resumePanel: ResumePanel | null = null;
   private pendingTrustModel: string | undefined;
   providerPanel: ProviderPanel | null = null;
@@ -183,6 +186,22 @@ export class AppView {
       if (hadPending) this.openModels(); else this.paint();
     }, () => this.paint());
     this.paint();
+  }
+  openPermission(request: PermissionRequest): Promise<PermissionDecision> {
+    if (this.permissionPanel) return Promise.resolve({ allow: false, message: "已有其他权限请求" });
+    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null; this.trustPanel = null; this.resumePanel = null;
+    return new Promise(resolve => {
+      let settled = false;
+      const decide = (decision: PermissionDecision) => {
+        if (settled) return;
+        settled = true;
+        this.permissionPanel = null;
+        this.paint();
+        resolve(decision);
+      };
+      this.permissionPanel = new PermissionPanel(request, decide, () => this.paint());
+      this.paint();
+    });
   }
 
   async openReasoning(): Promise<void> {
@@ -402,6 +421,7 @@ export class AppView {
   }
   handleKey(key: Key): boolean {
     const k = key.name;
+    if (this.permissionPanel) { this.permissionPanel.handle(key); return true; }
     if (this.trustPanel) { this.trustPanel.handle(key); return true; }
     if (this.resumePanel) { this.resumePanel.handle(key); return true; }
     if (this.agentSetupPanel) { this.agentSetupPanel.handle(key); return true; }
@@ -516,7 +536,8 @@ export class AppView {
   private contentWidth(): number { return Math.max(8, Math.min(104, this.opts.terminal.cols - 4)); }
   private blockRows(block: Block, width: number): Row[] {
     const text = stripAnsi(block.text).replace(/\t/g, "  ");
-    const key = JSON.stringify([text, block.kind, toDisplayText(block.meta?.status), stripAnsi(block.meta?.name), stripAnsi(block.meta?.input), width, this.showDetails]);
+    const runningSeconds = block.meta?.startedAt && block.meta?.status === "running" ? Math.floor((Date.now() - block.meta.startedAt) / 1000) : "";
+    const key = JSON.stringify([text, block.kind, toDisplayText(block.meta?.status), stripAnsi(block.meta?.name), stripAnsi(block.meta?.input), block.meta?.durationMs, runningSeconds, width, this.showDetails]);
     const cached = this.cache.get(block);
     if (cached?.key === key) return cached.rows;
     const rows: Row[] = [];
@@ -537,10 +558,12 @@ export class AppView {
     } else if (block.kind === "tool") {
       const status = block.meta?.status ?? "running";
       const color = status === "error" ? THEME.error : status === "done" ? THEME.success : THEME.warning;
-      const mark = status === "running" ? "◌" : status === "error" ? "×" : status === "cancelled" ? "–" : "✓";
       const toolName = stripAnsi(block.meta?.name ?? "工具");
       const badge = /skill/i.test(toolName) ? "SKILL" : /read|cat|view/i.test(toolName) ? "READ" : /shell|bash|command|terminal/i.test(toolName) ? "SHELL" : /write|edit|patch/i.test(toolName) ? "WRITE" : /search|grep|find/i.test(toolName) ? "SEARCH" : toolName.toUpperCase().slice(0, 10);
-      rows.push({ segments: [{ text: ` ${badge} `, style: makeStyle({ fg: THEME.text, bg: THEME.secondary, bold: true }) }, seg(`  ${status === "running" ? "Running" : status === "cancelled" ? "Cancelled" : status === "error" ? "Failed" : "Done"}`, color)] });
+      const elapsed = block.meta?.durationMs ?? (block.meta?.startedAt ? Date.now() - block.meta.startedAt : undefined);
+      const elapsedText = elapsed !== undefined ? ` · ${elapsed < 1000 ? `${elapsed}ms` : duration(elapsed)}` : "";
+      const mark = status === "running" ? "◌" : status === "error" ? "×" : status === "cancelled" ? "–" : "✓";
+      rows.push({ segments: [{ text: ` ${badge} `, style: makeStyle({ fg: THEME.text, bg: THEME.secondary, bold: true }) }, seg(`  ${mark} ${toolName}${elapsedText}`, color)] });
       if (block.meta?.input) plain(stripAnsi(block.meta.input), THEME.textMuted, 2, this.showDetails ? Infinity : 1);
       if (text) plain(text, status === "error" ? THEME.error : THEME.textMuted, 2, this.showDetails ? Infinity : 3);
     } else if (block.kind === "usage") {
@@ -555,7 +578,7 @@ export class AppView {
   }
   paint(): void {
     const { cols, rows } = this.opts.terminal;
-    if (this.selection && (this.selectionSize !== `${cols}:${rows}` || this.modelPicker || this.providerPanel || this.agentSetupPanel || this.trustPanel || this.resumePanel || this.reasoningPicker)) this.clearSelection();
+    if (this.selection && (this.selectionSize !== `${cols}:${rows}` || this.modelPicker || this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.resumePanel || this.reasoningPicker)) this.clearSelection();
     if (cols < 20 || rows < 10) {
       const screen = new Screen(cols, rows);
       screen.text(0, 0, truncateWidth("请放大终端窗口", cols), makeStyle({ fg: THEME.textMuted }));
@@ -636,10 +659,11 @@ export class AppView {
     }
     write(composerTop + inputH + 1, "─".repeat(width), THEME.border);
     const running = this.status === "running";
-    const status = running ? `${SPINNER[this.spinnerT % SPINNER.length]} ${this.statusText || "处理中"} · ${duration(Date.now() - this.startedAt)}` : this.statusText || (this.elapsed ? `✓ 已完成 · ${duration(this.elapsed)}` : "就绪");
+    const status = this.permissionPanel ? "⚠ 等待确认" : running ? `${SPINNER[this.spinnerT % SPINNER.length]} ${this.statusText || "处理中"} · ${duration(Date.now() - this.startedAt)}` : this.statusText || (this.elapsed ? `✓ 已完成 · ${duration(this.elapsed)}` : "就绪");
     const model = this.model ? `${this.model}${this.modelInfo[this.model]?.source === "local" ? " · 本机客户端" : ""}` : "未选择模型";
     const usage = stripAnsi(this.blocks.filter(b => b.kind === "usage").at(-1)?.text);
-    const statusLeft = `${model}  ·  ${reasoningLabel(this.reasoningEffort)}  ·  ${status}`;
+    const permission = this.permission === "ask" ? "ASK" : "AUTO";
+    const statusLeft = `${model}  ·  ${permission}  ·  ${reasoningLabel(this.reasoningEffort)}  ·  ${status}`;
     write(rows - 2, statusLeft, running ? THEME.warning : THEME.textMuted);
     if (usage && width - displayWidth(statusLeft) > displayWidth(usage) + 3) write(rows - 2, usage, THEME.textMuted, left + width - displayWidth(usage), displayWidth(usage));
     const hint = Date.now() < this.noticeUntil ? this.notice : this.selection ? this.selection.dragging ? "拖动选择 · 松开鼠标复制 · 拖到上下边缘滚动" : "选区已固定 · 右键 / Ctrl+C 复制 · Esc 取消选择" : running ? "Esc / Ctrl+C 停止 · 鼠标拖选复制 · PgUp/PgDn 浏览" : this.suggestions !== null ? "↑↓ 选择 · Enter 确认 · Tab 补全 · Esc 收起" : width < 65 ? "拖选复制 · F2 模型 · F3 来源 · F4 思考" : "拖选复制 · Enter 发送 · Alt+Enter 换行 · F2 模型 · F3 来源 · F4 思考 · F5 Agent";
@@ -647,7 +671,7 @@ export class AppView {
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;
     if (this.modelPicker) this.paintModelPicker(screen);
-    if (this.providerPanel || this.agentSetupPanel || this.trustPanel || this.resumePanel) this.paintProviderPanel(screen);
+    if (this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.resumePanel) this.paintProviderPanel(screen);
     if (this.reasoningPicker) this.paintReasoningPicker(screen);
     screen.defaultBackground(THEME.background);
     this.opts.terminal.paint(screen);
@@ -719,7 +743,7 @@ export class AppView {
   }
 
   private paintProviderPanel(screen: Screen): void {
-    const panel = (this.resumePanel ?? this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
+    const panel = (this.permissionPanel ?? this.resumePanel ?? this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
     const content = panel.rows().map(row => ({ ...row, text: stripAnsi(row.text).replace(/[\r\n\t]+/g, " · ") }));
     const width = Math.min(86, screen.cols - 4), height = Math.min(screen.rows - 2, content.length + 4);
     const left = Math.floor((screen.cols - width) / 2), top = Math.floor((screen.rows - height) / 2);

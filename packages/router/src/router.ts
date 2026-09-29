@@ -10,7 +10,7 @@
  *
  * 会话绑定 → 实时 Session 对象 由本层持有（SessionRegistry）。
  */
-import type { Adapter, AgentEvent, Session } from "@agent-router/core";
+import type { Adapter, AgentEvent, Session, SessionOptions } from "@agent-router/core";
 import { normalizeEventText, documentedReasoning, assertReasoningLevel, reasoningPreferenceKey, type ReasoningCapabilities } from "@agent-router/core";
 import type { Registry } from "./registry.js";
 import { TaskStore, type SessionBinding, type Task } from "./state.js";
@@ -18,12 +18,14 @@ import { TaskStore, type SessionBinding, type Task } from "./state.js";
 export interface TaskRouterOptions {
   /** 会话绑定持久目录（可选；留空则不落盘） */
   stateFile?: string;
+  onPermission?: SessionOptions["onPermission"];
 }
 
 export class TaskRouter {
   private sessions = new Map<string, Session>();
   private activeTurns = new Map<string, AbortController>();
   private stateFile: string | undefined;
+  private onPermission: SessionOptions["onPermission"];
 
   constructor(
     private registry: Registry,
@@ -31,6 +33,7 @@ export class TaskRouter {
     opts: TaskRouterOptions = {}
   ) {
     this.stateFile = opts.stateFile;
+    this.onPermission = opts.onPermission;
   }
 
   /** 模型可用性（委托给 Registry；CLI/IDE 用）。 */
@@ -141,7 +144,8 @@ export class TaskRouter {
       session = await this.registry.createSession(target.model, {
         cwd: task.cwd,
         permission: (task.meta.permission as "ask" | "auto") ?? "auto",
-        reasoningEffort: this.savedEffort(task, target.model)
+        reasoningEffort: this.savedEffort(task, target.model),
+        onPermission: this.onPermission
       });
       // 新 session id，但绑定指向原 adapterId —— harness 不变
       this.sessions.set(target.sessionId, session);
@@ -253,7 +257,7 @@ export class TaskRouter {
     if (!target) throw new Error("请先选择模型");
     let session = this.sessions.get(target.sessionId);
     if (!session) {
-      session = await this.registry.createSession(target.model, { cwd: task.cwd, permission: task.meta.permission as "ask" | "auto", reasoningEffort: this.savedEffort(task, target.model) });
+      session = await this.registry.createSession(target.model, { cwd: task.cwd, permission: task.meta.permission as "ask" | "auto", reasoningEffort: this.savedEffort(task, target.model), onPermission: this.onPermission });
       this.sessions.set(target.sessionId, session);
     }
     const entry = this.registry.entry(target.model)!;
@@ -327,7 +331,8 @@ export class TaskRouter {
     const session = await this.registry.createSession(opts.model, {
       cwd: task.cwd,
       permission: opts.permission ?? ((task.meta.permission as "ask" | "auto") ?? "auto"),
-      reasoningEffort: opts.reasoningEffort
+      reasoningEffort: opts.reasoningEffort,
+      onPermission: this.onPermission
     });
     this.sessions.set(session.id, session);
     task.meta.permission = opts.permission ?? task.meta.permission;

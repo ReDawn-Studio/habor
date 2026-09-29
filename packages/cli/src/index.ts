@@ -69,7 +69,12 @@ async function trackLifecycle<T>(action: () => Promise<T>): Promise<T> {
   try { return await work; } finally { if (lifecycleWork === work) lifecycleWork = undefined; }
 }
 const reasoningPreferences = new ReasoningPreferences(stateDir);
-const { router, tasks, registry } = createRouter(createAdapters(), { stateFile });
+const { router, tasks, registry } = createRouter(createAdapters(), { stateFile,
+  onPermission: async request => {
+    if (!tui) return { allow: false, message: "非交互模式无法确认此操作" };
+    return tui.view.openPermission(request);
+  }
+});
 registry.configure(providers.entries(), entry => providers.connection(entry));
 if (existsSync(stateFile)) {
   try {
@@ -189,7 +194,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   /resume [任务 ID]     恢复当前工作区的历史任务
   /new                  结束当前任务，开始新任务
   /status               当前任务 + 会话绑定
-  /permission <ask|auto> 权限模式
+  /permission <ask|auto> 权限模式；ask 在工具执行前等待确认
   /clear                清空屏幕（保留任务和对话）
   /help                 帮助
   /quit                 退出
@@ -206,6 +211,7 @@ const HELP = `habor — 原生 Agent 聚合平台
   ↑↓                    历史输入 / 多行移动
   PgUp / PgDn             浏览对话；Esc 回到底部
   Ctrl+O                展开或折叠思考与工具输出
+  Y / N                 权限面板中允许或拒绝当前工具调用
   鼠标左键拖选          高亮输出，松开后自动复制；右键可再次复制
   Ctrl+Y                复制选中文本；无选区时复制最近一段回复
   Ctrl+L                清空屏幕

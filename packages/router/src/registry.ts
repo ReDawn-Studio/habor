@@ -4,7 +4,7 @@
  * 核心产品决策：CLI/IDE 暴露给用户的是「模型」；选模型后由这里
  * 决定真正去跑哪个厂商的原生 agent（用户完全不感知）。
  */
-import type { Adapter, ModelEntry, ApiConnection } from "@agent-router/core";
+import type { Adapter, ModelEntry, ApiConnection, SessionOptions } from "@agent-router/core";
 
 /** 模型目录：每个用户可见模型绑定一个原生 harness。 */
 export const MODEL_CATALOG: ModelEntry[] = [
@@ -118,7 +118,7 @@ export class Registry {
   }
 
   /** 为一个模型创建一个会话 —— 内部自动路由到对应原生 harness。 */
-  async createSession(model: string, opts: { cwd: string; permission?: "ask" | "auto"; reasoningEffort?: string }) {
+  async createSession(model: string, opts: { cwd: string; permission?: "ask" | "auto"; reasoningEffort?: string; onPermission?: SessionOptions["onPermission"] }) {
     const adapterId = this.entries.get(model)?.adapterId;
     if (!adapterId) throw new Error(`未知模型: ${model}`);
     const adapter = this.adapters.get(adapterId);
@@ -133,7 +133,8 @@ export class Registry {
       reasoningEffort: opts.reasoningEffort,
       reasoningLevels: this.entries.get(model)?.reasoningLevels,
       cwd: opts.cwd,
-      permission: opts.permission
+      permission: opts.permission,
+      onPermission: opts.onPermission
     });
   }
 

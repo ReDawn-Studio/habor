@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRouter } from '../dist/index.js';
 
-function harness(makePrompt) {
+function harness(makePrompt, routerOptions = {}) {
   const sessions = [], inputs = [];
   const adapter = {
     id: 'dsh-acp', harnessName: 'Test', models: ['DeepSeek V4 Flash'],
     isAvailable: async () => true,
     createSession: async opts => {
       const session = {
-        id: `session-${sessions.length}`, adapterId: 'dsh-acp', model: opts.model, cwd: opts.cwd,
+        id: `session-${sessions.length}`, adapterId: 'dsh-acp', model: opts.model, cwd: opts.cwd, permissionHandler: opts.onPermission,
         cancelled: false, closed: false,
         prompt(input) { inputs.push(input); return makePrompt(sessions.indexOf(session)); },
         async cancel() { this.cancelled = true; }, async close() { this.closed = true; }
@@ -17,8 +17,15 @@ function harness(makePrompt) {
       sessions.push(session); return session;
     }
   };
-  return { ...createRouter([adapter]), sessions, inputs };
+  return { ...createRouter([adapter], routerOptions), sessions, inputs };
 }
+
+test('router keeps the interactive permission callback on newly bound sessions', async () => {
+  const onPermission = async () => ({ allow: true, optionId: 'allow' });
+  const { router, sessions } = harness(async function* () { yield { type: 'done' }; }, { onPermission });
+  await router.newTask({ model: 'DeepSeek V4 Flash', cwd: '/test', permission: 'ask' });
+  assert.equal(sessions[0].permissionHandler, onPermission);
+});
 
 test('delta-only streams persist one complete assistant turn', async () => {
   const { router } = harness(async function* () {

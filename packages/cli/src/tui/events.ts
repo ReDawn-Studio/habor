@@ -6,6 +6,7 @@ import { formatTokens, toolSummary } from "./vendor/util.js";
 /** One projector per turn. Tools are matched by id even when results arrive out of order. */
 export class TurnEvents {
   private tools = new Map<string, Block>();
+  private toolStartedAt = new Map<string, number>();
   private accumulated = "";
   failed = false;
   constructor(private view: AppView) {}
@@ -45,10 +46,12 @@ export class TurnEvents {
         if (!tool) break;
         const existing = this.tools.get(tool.id);
         if (existing) {
-          existing.meta = { ...existing.meta, name: tool.name, input: toolSummary(tool.name, tool.input) };
+          existing.meta = { ...existing.meta, name: tool.name, input: toolSummary(tool.name, tool.input), startedAt: existing.meta?.startedAt ?? Date.now() };
           this.view.paint();
         } else {
-          const block: Block = { kind: "tool", text: "", meta: { id: tool.id, name: tool.name, input: toolSummary(tool.name, tool.input), status: "running" } };
+          const startedAt = Date.now();
+          this.toolStartedAt.set(tool.id, startedAt);
+          const block: Block = { kind: "tool", text: "", meta: { id: tool.id, name: tool.name, input: toolSummary(tool.name, tool.input), status: "running", startedAt } };
           this.tools.set(tool.id, block);
           this.view.append(block);
         }
@@ -65,7 +68,10 @@ export class TurnEvents {
           this.view.append(block);
         }
         if (result.output) block.text = result.output;
-        block.meta = { ...block.meta, status: result.isError ? "error" : result.status ?? "done" };
+        const startedAt = this.toolStartedAt.get(result.id) ?? block.meta?.startedAt;
+        const status = result.isError ? "error" : result.status ?? "done";
+        block.meta = { ...block.meta, status, durationMs: status === "running" ? block.meta?.durationMs : startedAt ? Date.now() - startedAt : block.meta?.durationMs };
+        if (status !== "running") this.toolStartedAt.delete(result.id);
         this.view.paint();
         break;
       }
@@ -79,7 +85,7 @@ export class TurnEvents {
         break;
       }
       case "file_change":
-        if (ev.file) this.view.append({ kind: "system", text: `↳ ${ev.file.path}  +${ev.file.added ?? 0} −${ev.file.removed ?? 0}` });
+        if (ev.file) this.view.append({ kind: "tool", text: "", meta: { id: `file:${ev.file.path}:${ev.ts}`, name: `${ev.file.type === "delete" ? "Delete" : ev.file.type === "write" ? "Write" : "Edit"} ${ev.file.path}`, input: `+${ev.file.added ?? 0} −${ev.file.removed ?? 0}`, status: "done", durationMs: 0 } });
         break;
       case "terminal":
         if (ev.terminal?.output) this.view.append({ kind: "tool", text: ev.terminal.output, meta: { name: ev.terminal.command ?? "终端输出", status: "done" } });
@@ -95,8 +101,13 @@ export class TurnEvents {
   }
   finish(cancelled = false): void {
     for (const block of this.tools.values()) {
-      if (block.meta?.status === "running") block.meta.status = cancelled ? "cancelled" : this.failed ? "error" : "done";
+      if (block.meta?.status === "running") {
+        block.meta.status = cancelled ? "cancelled" : this.failed ? "error" : "done";
+        const startedAt = this.toolStartedAt.get(block.meta.id ?? "") ?? block.meta.startedAt;
+        if (startedAt) block.meta.durationMs = Date.now() - startedAt;
+      }
     }
+    this.toolStartedAt.clear();
     this.view.paint();
   }
 }
