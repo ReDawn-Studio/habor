@@ -7,6 +7,7 @@
 - macOS 增加 pbcopy 剪贴板支持；Windows / Linux 使用本机工具，SSH 保留 OSC 52。退出或原生认证接管时恢复鼠标模式。
 - 未信任工作区在启动 habor 时立即显示信任确认，不再等到选择模型后才提示。
 - 工具活动显示具体操作、参数摘要、耗时和结果；`/permission ask` 增加可操作的 Allow / Deny 确认面板，并在状态栏显示 `ASK/AUTO`。
+- 任务新增 Harness Profile 和 TurnRun 记录；`/trace` 查看执行时间线，`/files` 查看任务记录的文件产物，失败与取消状态会结构化保存。
 
 ## v0.5.9 — 2026-09-18
 

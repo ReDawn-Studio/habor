@@ -27,6 +27,27 @@ test('router keeps the interactive permission callback on newly bound sessions',
   assert.equal(sessions[0].permissionHandler, onPermission);
 });
 
+test('turn runs persist the harness profile, tool timeline and file artifacts', async () => {
+  const { router } = harness(async function* () {
+    yield { type: 'tool_call', tool: { id: 'read-1', name: 'Read', input: { path: 'README.md' } } };
+    yield { type: 'file_change', file: { path: 'out.txt', type: 'write', added: 3, removed: 0 } };
+    yield { type: 'tool_result', toolResult: { id: 'read-1', name: 'Read', output: 'ok' } };
+    yield { type: 'message', delta: 'done' };
+    yield { type: 'done' };
+  });
+  const task = await router.newTask({ model: 'DeepSeek V4 Flash', cwd: '/test', permission: 'ask' });
+  for await (const event of router.continueTask(task.id, 'inspect files')) { /* consume */ }
+  const run = task.runs[0];
+  assert.equal(task.harnessProfile.model, 'DeepSeek V4 Flash');
+  assert.equal(task.harnessProfile.permission, 'ask');
+  assert.equal(run.status, 'completed');
+  assert.equal(run.tools[0].status, 'done');
+  assert.equal(run.tools[0].input, '{"path":"README.md"}');
+  assert.equal(task.artifacts[0].path, 'out.txt');
+  assert.deepEqual(router.trace(task.id).map(item => item.id), [run.id]);
+  assert.equal(router.artifacts(task.id)[0].runId, run.id);
+});
+
 test('delta-only streams persist one complete assistant turn', async () => {
   const { router } = harness(async function* () {
     yield { type: 'message', delta: '你好' };
@@ -56,6 +77,7 @@ test('stopping a hung transport releases the turn and restores context on contin
   const result = await Promise.race([waiting, new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('cancellation hung')), 500); timer.unref(); })]);
   assert.equal(result.done, true);
   assert.equal(sessions[0].cancelled, true); assert.equal(sessions[0].closed, true);
+  assert.equal(router.status(task.id).latestRun.status, 'cancelled');
   for await (const event of router.continueTask(task.id, 'continue please')) { /* consume */ }
   assert.equal(sessions.length, 2);
   assert.match(inputs[1], /initial request/); assert.match(inputs[1], /partial answer/);

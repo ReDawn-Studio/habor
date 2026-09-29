@@ -13,6 +13,9 @@ import type { AuthMethod, AuthStatus } from "../agent-auth.js";
 import { TranscriptSelection } from "./transcript-selection.js";
 import { PermissionPanel } from "./permission-panel.js";
 import type { PermissionDecision, PermissionRequest } from "@agent-router/core";
+import { TracePanel } from "./trace-panel.js";
+import { FilesPanel } from "./files-panel.js";
+import type { Artifact, TurnRun } from "@agent-router/router";
 
 export const THEME = {
   primary: "d99a78", secondary: "c6b5ff", accent: "a5bdf7",
@@ -86,6 +89,8 @@ export class AppView {
   agentSetupPanel: AgentSetupPanel | null = null;
   trustPanel: WorkspaceTrustPanel | null = null;
   permissionPanel: PermissionPanel | null = null;
+  tracePanel: TracePanel | null = null;
+  filesPanel: FilesPanel | null = null;
   resumePanel: ResumePanel | null = null;
   private pendingTrustModel: string | undefined;
   providerPanel: ProviderPanel | null = null;
@@ -189,7 +194,7 @@ export class AppView {
   }
   openPermission(request: PermissionRequest): Promise<PermissionDecision> {
     if (this.permissionPanel) return Promise.resolve({ allow: false, message: "已有其他权限请求" });
-    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null; this.trustPanel = null; this.resumePanel = null;
+    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null; this.trustPanel = null; this.tracePanel = null; this.filesPanel = null; this.resumePanel = null;
     return new Promise(resolve => {
       let settled = false;
       const decide = (decision: PermissionDecision) => {
@@ -202,6 +207,17 @@ export class AppView {
       this.permissionPanel = new PermissionPanel(request, decide, () => this.paint());
       this.paint();
     });
+  }
+  openTrace(runs: TurnRun[]): void {
+    if (!runs.length) { this.notify("当前任务还没有执行记录"); return; }
+    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null; this.trustPanel = null; this.permissionPanel = null; this.resumePanel = null; this.filesPanel = null;
+    this.tracePanel = new TracePanel(runs, () => { this.tracePanel = null; this.paint(); }, () => this.paint());
+    this.paint();
+  }
+  openFiles(artifacts: Artifact[]): void {
+    this.modelPicker = null; this.providerPanel = null; this.agentSetupPanel = null; this.trustPanel = null; this.permissionPanel = null; this.resumePanel = null; this.tracePanel = null;
+    this.filesPanel = new FilesPanel(artifacts, () => { this.filesPanel = null; this.paint(); }, () => this.paint());
+    this.paint();
   }
 
   async openReasoning(): Promise<void> {
@@ -422,6 +438,8 @@ export class AppView {
   handleKey(key: Key): boolean {
     const k = key.name;
     if (this.permissionPanel) { this.permissionPanel.handle(key); return true; }
+    if (this.tracePanel) { this.tracePanel.handle(key); return true; }
+    if (this.filesPanel) { this.filesPanel.handle(key); return true; }
     if (this.trustPanel) { this.trustPanel.handle(key); return true; }
     if (this.resumePanel) { this.resumePanel.handle(key); return true; }
     if (this.agentSetupPanel) { this.agentSetupPanel.handle(key); return true; }
@@ -578,7 +596,7 @@ export class AppView {
   }
   paint(): void {
     const { cols, rows } = this.opts.terminal;
-    if (this.selection && (this.selectionSize !== `${cols}:${rows}` || this.modelPicker || this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.resumePanel || this.reasoningPicker)) this.clearSelection();
+    if (this.selection && (this.selectionSize !== `${cols}:${rows}` || this.modelPicker || this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.tracePanel || this.filesPanel || this.resumePanel || this.reasoningPicker)) this.clearSelection();
     if (cols < 20 || rows < 10) {
       const screen = new Screen(cols, rows);
       screen.text(0, 0, truncateWidth("请放大终端窗口", cols), makeStyle({ fg: THEME.textMuted }));
@@ -671,7 +689,7 @@ export class AppView {
     screen.cursorX = Math.min(cols - 1, left + 3 + caret.col);
     screen.cursorY = composerTop + 1 + caret.row - inputStart;
     if (this.modelPicker) this.paintModelPicker(screen);
-    if (this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.resumePanel) this.paintProviderPanel(screen);
+    if (this.providerPanel || this.agentSetupPanel || this.trustPanel || this.permissionPanel || this.tracePanel || this.filesPanel || this.resumePanel) this.paintProviderPanel(screen);
     if (this.reasoningPicker) this.paintReasoningPicker(screen);
     screen.defaultBackground(THEME.background);
     this.opts.terminal.paint(screen);
@@ -743,7 +761,7 @@ export class AppView {
   }
 
   private paintProviderPanel(screen: Screen): void {
-    const panel = (this.permissionPanel ?? this.resumePanel ?? this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
+    const panel = (this.tracePanel ?? this.filesPanel ?? this.permissionPanel ?? this.resumePanel ?? this.trustPanel ?? this.agentSetupPanel ?? this.providerPanel)!;
     const content = panel.rows().map(row => ({ ...row, text: stripAnsi(row.text).replace(/[\r\n\t]+/g, " · ") }));
     const width = Math.min(86, screen.cols - 4), height = Math.min(screen.rows - 2, content.length + 4);
     const left = Math.floor((screen.cols - width) / 2), top = Math.floor((screen.rows - height) / 2);

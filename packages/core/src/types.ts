@@ -166,3 +166,19 @@ export interface ModelEntry {
   /** 展示用的一句话描述 */
   display?: string;
 }
+
+/** A configured execution profile: the complete harness choice for a task. */
+export interface HarnessProfile {
+  id: string;
+  name: string;
+  adapterId: string;
+  model: string;
+  modelId?: string;
+  sourceKind?: SourceKind;
+  providerId?: string;
+  permission: "ask" | "auto";
+  reasoningEffort?: string;
+  instructions?: string;
+  skills?: string[];
+  disabledTools?: string[];
+}

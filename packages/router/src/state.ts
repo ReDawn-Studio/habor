@@ -16,6 +16,45 @@
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import type { HarnessProfile } from "@agent-router/core";
+
+export type TurnStatus = "in_progress" | "completed" | "failed" | "incomplete" | "cancelled";
+
+export interface TurnError {
+  code?: string;
+  message: string;
+  retryable?: boolean;
+  phase?: "routing" | "connecting" | "thinking" | "tool" | "finalizing";
+}
+
+export interface TurnToolRun {
+  id: string;
+  name: string;
+  status: "running" | "done" | "error" | "cancelled";
+  startedAt: number;
+  finishedAt?: number;
+  durationMs?: number;
+  input?: string;
+  output?: string;
+}
+
+export interface TurnRun {
+  id: string;
+  taskId: string;
+  seq: number;
+  input: string;
+  status: TurnStatus;
+  model: string;
+  adapterId: string;
+  sessionId: string;
+  startedAt: number;
+  finishedAt?: number;
+  elapsedMs?: number;
+  tools: TurnToolRun[];
+  artifactIds: string[];
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; cachedTokens?: number };
+  error?: TurnError;
+}
 
 /** 一次会话绑定：任务在某段时间内跑在哪个 harness session 上。 */
 export interface SessionBinding {
@@ -65,6 +104,9 @@ export interface Artifact {
   path: string;
   createdAt: number;
   size: number;
+  added?: number;
+  removed?: number;
+  runId?: string;
 }
 
 /** 可回滚点。 */
@@ -97,6 +139,10 @@ export interface Task {
   contextSnapshots: ContextSnapshot[];
   artifacts: Artifact[];
   checkpoints: Checkpoint[];
+  /** Stable execution profile selected for the current task. */
+  harnessProfile?: HarnessProfile;
+  /** Atomic executions within this task, newest last. */
+  runs: TurnRun[];
   /** 附加元数据 */
   meta: Record<string, unknown>;
 }
@@ -105,6 +151,7 @@ export interface CreateTaskOptions {
   title: string;
   cwd: string;
   meta?: Record<string, unknown>;
+  harnessProfile?: HarnessProfile;
 }
 
 /**
@@ -128,6 +175,8 @@ export class TaskStore {
       contextSnapshots: [],
       artifacts: [],
       checkpoints: [],
+      runs: [],
+      harnessProfile: opts.harnessProfile,
       meta: opts.meta ?? {}
     };
     this.tasks.set(task.id, task);
@@ -220,6 +269,49 @@ export class TaskStore {
     return a;
   }
 
+  startRun(task: Task, run: Omit<TurnRun, "id" | "taskId" | "seq" | "startedAt" | "status" | "tools" | "artifactIds"> & Partial<Pick<TurnRun, "startedAt" | "tools" | "artifactIds">>): TurnRun {
+    const next: TurnRun = {
+      ...run,
+      id: `run-${randomUUID().slice(0, 12)}`,
+      taskId: task.id,
+      seq: task.runs.length + 1,
+      status: "in_progress",
+      startedAt: run.startedAt ?? Date.now(),
+      tools: run.tools ?? [],
+      artifactIds: run.artifactIds ?? []
+    };
+    task.runs.push(next);
+    this.touch(task);
+    return next;
+  }
+
+  updateRun(task: Task, runId: string, patch: Partial<TurnRun>): TurnRun | undefined {
+    const run = task.runs.find(item => item.id === runId);
+    if (!run) return undefined;
+    Object.assign(run, patch);
+    this.touch(task);
+    return run;
+  }
+
+  finishRun(task: Task, runId: string, status: Exclude<TurnStatus, "in_progress">, error?: TurnError): TurnRun | undefined {
+    const run = task.runs.find(item => item.id === runId);
+    if (!run) return undefined;
+    const finishedAt = Date.now();
+    run.status = status;
+    run.finishedAt = finishedAt;
+    run.elapsedMs = finishedAt - run.startedAt;
+    if (error) run.error = error;
+    for (const tool of run.tools) {
+      if (tool.status === "running") {
+        tool.status = status === "cancelled" ? "cancelled" : status === "failed" ? "error" : "done";
+        tool.finishedAt = finishedAt;
+        tool.durationMs = finishedAt - tool.startedAt;
+      }
+    }
+    this.touch(task);
+    return run;
+  }
+
   addCheckpoint(task: Task, opts: { note: string; gitRef?: string; contextSnapshotId?: string }): Checkpoint {
     const c: Checkpoint = {
       id: `cp-${randomUUID().slice(0, 8)}`,
@@ -251,6 +343,13 @@ export class TaskStore {
     for (const line of json.split("\n")) {
       if (!line.trim()) continue;
       const t = JSON.parse(line) as Task;
+      t.runs ??= [];
+      for (const run of t.runs) { run.tools ??= []; run.artifactIds ??= []; }
+      t.artifacts ??= [];
+      t.checkpoints ??= [];
+      t.contextSnapshots ??= [];
+      t.bindings ??= [];
+      t.conversation ??= [];
       this.tasks.set(t.id, t);
       for (const turn of t.conversation) {
         if (turn.seq > this.seq) this.seq = turn.seq;

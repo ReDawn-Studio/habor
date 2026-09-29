@@ -4,7 +4,7 @@
  * 核心产品决策：CLI/IDE 暴露给用户的是「模型」；选模型后由这里
  * 决定真正去跑哪个厂商的原生 agent（用户完全不感知）。
  */
-import type { Adapter, ModelEntry, ApiConnection, SessionOptions } from "@agent-router/core";
+import type { Adapter, ModelEntry, ApiConnection, HarnessProfile, SessionOptions } from "@agent-router/core";
 
 /** 模型目录：每个用户可见模型绑定一个原生 harness。 */
 export const MODEL_CATALOG: ModelEntry[] = [
@@ -91,6 +91,22 @@ export class Registry {
     this.resolveConnection = resolveConnection;
   }
   entry(model: string): ModelEntry | undefined { return this.entries.get(model); }
+  profile(model: string, opts: { permission?: "ask" | "auto"; reasoningEffort?: string } = {}): HarnessProfile {
+    const entry = this.entries.get(model);
+    if (!entry) throw new Error(`未知模型: ${model}`);
+    const profileId = `profile-${entry.adapterId}-${(entry.modelId ?? model).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+    return {
+      id: profileId,
+      name: `${entry.vendor} · ${entry.model}`,
+      adapterId: entry.adapterId,
+      model,
+      modelId: entry.modelId,
+      sourceKind: entry.sourceKind,
+      providerId: entry.providerId,
+      permission: opts.permission ?? "auto",
+      reasoningEffort: opts.reasoningEffort
+    };
+  }
   protocol(model: string): "acp" | undefined { return this.adapters.get(this.entries.get(model)?.adapterId ?? "")?.protocol; }
   listModels(): ModelEntry[] { return [...this.entries.values()]; }
   async availableAdapters(): Promise<Record<string, boolean>> {

@@ -207,6 +207,16 @@ test('ask mode presents an approval panel and resolves the selected decision', a
   assert.equal(view.permissionPanel, null);
 });
 
+test('trace and file panels expose structured task results without leaving the transcript', () => {
+  const { view, text } = setup();
+  view.openTrace([{ id: 'run-1', taskId: 'task-1', seq: 1, input: 'inspect', status: 'completed', model: 'GPT-5.5', adapterId: 'codex-acp', sessionId: 'session-1', startedAt: 1, finishedAt: 1201, elapsedMs: 1200, tools: [{ id: 'tool-1', name: 'Read', status: 'done', startedAt: 1, finishedAt: 101, durationMs: 100 }], artifactIds: ['art-1'] }]);
+  assert.ok(view.tracePanel); assert.match(text(), /执行 Trace/); assert.match(text(), /GPT-5.5/); assert.match(text(), /Read/);
+  view.handleKey({ name: 'escape' }); assert.equal(view.tracePanel, null);
+  view.openFiles([{ id: 'art-1', kind: 'file', path: 'out.txt', createdAt: 1, size: 0, added: 3, removed: 0 }]);
+  assert.ok(view.filesPanel); assert.match(text(), /任务文件/); assert.match(text(), /out.txt/);
+  view.handleKey({ name: 'escape' }); assert.equal(view.filesPanel, null);
+});
+
 test('markdown wrapping preserves code indentation, wide text and headings at narrow widths', () => {
   for (const width of [1, 8, 24, 76]) {
     const lines = renderMarkdown('# 标题'.repeat(12) + '\n```ts\n    const result = "你好👋";\n```', THEME, width);

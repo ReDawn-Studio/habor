@@ -80,6 +80,8 @@ F2 打开面板时会保留原有草稿和光标位置。
 | 浏览对话 | PgUp / PgDn、Shift+↑↓；Esc 回到底部 |
 | 展开思考与完整工具输出 | Ctrl+O |
 | 工具执行确认 | `/permission ask` 后按 Y / N，或用 ↑↓、Enter 选择 |
+| 查看执行时间线 | `/trace`，显示每次运行的状态、耗时、工具和文件 |
+| 查看任务文件 | `/files`，显示 Agent 事件记录的文件变更和产物 |
 | 复制选中输出 | 鼠标左键拖选，松开自动复制；选中后右键 / Ctrl+C 再次复制 |
 | 复制最近一段回复 | 无选区时 Ctrl+Y；有选区时复制选中文本 |
 | 清空屏幕，保留任务 | Ctrl+L / `/clear` |
@@ -96,6 +98,7 @@ macOS 使用 `pbcopy`，Windows 使用 PowerShell，Linux 尝试 `wl-copy` / `xc
 设置 `HABOR_MOUSE_SCROLL=0` 可使用终端原生拖选与 Cmd+C / Ctrl+Shift+C，内部浏览仍可使用 PgUp / PgDn。
 
 权限模式可以用 `/permission ask|auto` 切换。`AUTO` 直接沿用 Agent 的自动执行策略；`ASK` 会在工具调用需要许可时暂停，并显示操作名称、说明和可选动作，按 `Y` / `N` 或方向键、Enter 完成决定。
+每个任务会保存一个 Harness Profile，记录实际使用的 Agent、模型、来源、权限和思考强度；`/status` 会显示该配置以及最近一次 TurnRun 的状态。
 
 进入一个未信任的目录时，启动 habor 就会显示工作区信任确认。选择“是，继续”后才可选择模型并创建 Agent 任务；选择“否，退出”会退出 habor。
 确认记录保存在 `~/.habor/trust.json`，按工作区目录分别保存；也可以使用 `/trust` 再次打开确认面板。

@@ -8,6 +8,7 @@ import { Terminal } from "./vendor/term.js";
 import { AppView, type Block } from "./app.js";
 import type { ProviderProfile, ReasoningCapabilities } from "@agent-router/core";
 import type { AuthMethod, AuthStatus } from "../agent-auth.js";
+import type { Artifact, TurnRun } from "@agent-router/router";
 
 export interface TuiControllerOptions {
   version: string;
@@ -141,6 +142,8 @@ export class TuiController {
     this.view.blocks.push({ kind: "system", text });
     this.view.paint();
   }
+  openTrace(runs: TurnRun[]): void { this.view.openTrace(runs); }
+  openFiles(artifacts: Artifact[]): void { this.view.openFiles(artifacts); }
 }
 
 export type { Block } from "./app.js";

@@ -10,10 +10,10 @@
  *
  * 会话绑定 → 实时 Session 对象 由本层持有（SessionRegistry）。
  */
-import type { Adapter, AgentEvent, Session, SessionOptions } from "@agent-router/core";
+import type { Adapter, AgentEvent, HarnessProfile, Session, SessionOptions } from "@agent-router/core";
 import { normalizeEventText, documentedReasoning, assertReasoningLevel, reasoningPreferenceKey, type ReasoningCapabilities } from "@agent-router/core";
 import type { Registry } from "./registry.js";
-import { TaskStore, type SessionBinding, type Task } from "./state.js";
+import { TaskStore, type SessionBinding, type Task, type TurnError, type TurnRun } from "./state.js";
 
 export interface TaskRouterOptions {
   /** 会话绑定持久目录（可选；留空则不落盘） */
@@ -68,13 +68,15 @@ export class TaskRouter {
   }
 
   /** 新建任务：Router 首次判路由（用户选模型 → 对应原生 harness）。 */
-  async newTask(opts: { model: string; cwd: string; title?: string; permission?: "ask" | "auto"; reasoningEffort?: string }): Promise<Task> {
+  async newTask(opts: { model: string; cwd: string; title?: string; permission?: "ask" | "auto"; reasoningEffort?: string; profile?: HarnessProfile }): Promise<Task> {
+    const profile = opts.profile ?? this.registry.profile(opts.model, { permission: opts.permission, reasoningEffort: opts.reasoningEffort });
     const task = this.tasks.createTask({
       title: opts.title ?? `任务 @ ${new Date().toLocaleTimeString()}`,
       cwd: opts.cwd,
+      harnessProfile: profile,
       meta: { model: opts.model, permission: opts.permission ?? "auto" }
     });
-    await this.routeAndBind(task, { model: opts.model, reason: "new", permission: opts.permission, reasoningEffort: opts.reasoningEffort });
+    await this.routeAndBind(task, { model: opts.model, reason: "new", permission: opts.permission, reasoningEffort: opts.reasoningEffort, profile });
     return task;
   }
 
@@ -166,6 +168,13 @@ export class TaskRouter {
 
     this.tasks.appendTurn(task, { role: "user", text: input, model: target.model, adapterId: target.adapterId });
 
+    const run = this.tasks.startRun(task, {
+      input,
+      model: target.model,
+      adapterId: target.adapterId,
+      sessionId: target.sessionId
+    });
+
     const iterator = session.prompt(effectiveInput)[Symbol.asyncIterator]();
     let cancel: () => void = () => {};
     const interrupted = new Promise<IteratorResult<AgentEvent>>((resolve) => {
@@ -173,17 +182,22 @@ export class TaskRouter {
       signal.addEventListener("abort", cancel, { once: true });
     });
     let answer = "";
+    let runError: TurnError | undefined;
     try {
       while (!signal.aborted) {
         const next = await Promise.race([iterator.next(), interrupted]);
         if (next.done || signal.aborted) break;
         const ev = normalizeEventText(next.value);
+        this.recordRunEvent(task, run, ev);
         if (ev.type === "message") {
           if (ev.delta !== undefined) answer += ev.delta;
           else if (ev.text) answer = ev.text.startsWith(answer) ? ev.text : answer + ev.text;
         }
         yield ev;
       }
+    } catch (error) {
+      runError = { code: errorCode(error), message: error instanceof Error ? error.message : String(error), phase: "finalizing", retryable: true };
+      throw error;
     } finally {
       signal.removeEventListener("abort", cancel);
       // Some transports leave nextUpdate pending after their process dies.
@@ -197,6 +211,8 @@ export class TaskRouter {
           adapterId: target.adapterId
         });
       }
+      const status = signal.aborted ? "cancelled" : runError || run.error ? "failed" : "completed";
+      this.tasks.finishRun(task, run.id, status, runError);
     }
   }
 
@@ -223,6 +239,16 @@ export class TaskRouter {
       try { await session.cancel(); }
       finally { await session.close(); }
     }));
+  }
+
+  trace(taskId: string, runId?: string): TurnRun[] {
+    const task = this.requireTask(taskId);
+    return structuredClone(runId ? task.runs.filter(run => run.id === runId) : task.runs);
+  }
+
+  artifacts(taskId: string) {
+    const task = this.requireTask(taskId);
+    return structuredClone(task.artifacts);
   }
 
   async refreshSession(taskId: string): Promise<void> {
@@ -299,9 +325,9 @@ export class TaskRouter {
   }
 
   /** 任务当前绑定信息（CLI /status 用）。 */
-  status(taskId: string): { task: Task; target?: { sessionId: string; adapterId: string; model: string } } {
+  status(taskId: string): { task: Task; target?: { sessionId: string; adapterId: string; model: string }; profile?: HarnessProfile; latestRun?: TurnRun } {
     const task = this.requireTask(taskId);
-    return { task, target: this.tasks.currentTarget(task) };
+    return { task, target: this.tasks.currentTarget(task), profile: task.harnessProfile, latestRun: task.runs.at(-1) };
   }
 
   async finishTask(taskId: string, status: "done" | "failed"): Promise<void> {
@@ -326,7 +352,7 @@ export class TaskRouter {
 
   private async routeAndBind(
     task: Task,
-    opts: { model: string; reason: "new" | "switch"; permission?: "ask" | "auto"; reasoningEffort?: string }
+    opts: { model: string; reason: "new" | "switch"; permission?: "ask" | "auto"; reasoningEffort?: string; profile?: HarnessProfile }
   ): Promise<SessionBinding> {
     const session = await this.registry.createSession(opts.model, {
       cwd: task.cwd,
@@ -336,6 +362,7 @@ export class TaskRouter {
     });
     this.sessions.set(session.id, session);
     task.meta.permission = opts.permission ?? task.meta.permission;
+    task.harnessProfile = opts.profile ?? this.registry.profile(opts.model, { permission: opts.permission ?? (task.meta.permission as "ask" | "auto"), reasoningEffort: opts.reasoningEffort });
     this.rememberEffort(task, opts.model, opts.reasoningEffort);
     return this.tasks.bindSession(task, {
       sessionId: session.id,
@@ -358,6 +385,48 @@ export class TaskRouter {
     }
     return [...files];
   }
+
+  private recordRunEvent(task: Task, run: TurnRun, ev: AgentEvent): void {
+    const ts = ev.ts || Date.now();
+    if (ev.type === "tool_call" && ev.tool) {
+      if (!run.tools.some(tool => tool.id === ev.tool!.id)) {
+        run.tools.push({ id: ev.tool.id, name: ev.tool.name, status: "running", startedAt: ts, input: preview(ev.tool.input) });
+      }
+    } else if (ev.type === "tool_result" && ev.toolResult) {
+      const tool = run.tools.find(item => item.id === ev.toolResult!.id);
+      if (tool) {
+        const status = ev.toolResult.isError ? "error" : ev.toolResult.status ?? "done";
+        tool.status = status;
+        tool.output = ev.toolResult.output;
+        if (status !== "running") {
+          tool.finishedAt = ts;
+          tool.durationMs = ts - tool.startedAt;
+        }
+      }
+    } else if (ev.type === "file_change" && ev.file) {
+      const artifact = this.tasks.addArtifact(task, { kind: "file", path: ev.file.path, size: 0, added: ev.file.added, removed: ev.file.removed, runId: run.id });
+      run.artifactIds.push(artifact.id);
+    } else if (ev.type === "usage" && ev.usage) {
+      run.usage = { inputTokens: ev.usage.inputTokens, outputTokens: ev.usage.outputTokens, totalTokens: ev.usage.totalTokens, cachedTokens: ev.usage.cachedTokens };
+    } else if (ev.type === "error" && ev.error) {
+      run.error = { code: ev.error.code, message: ev.error.message, phase: "tool", retryable: true };
+    }
+    this.tasks.updateRun(task, run.id, run);
+  }
+}
+
+function preview(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value.length > 240 ? value.slice(0, 239) + "…" : value;
+  try {
+    const text = JSON.stringify(value);
+    return text.length > 240 ? text.slice(0, 239) + "…" : text;
+  } catch { return String(value); }
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (error && typeof error === "object" && "code" in error && typeof (error as { code?: unknown }).code === "string") return (error as { code: string }).code;
+  return undefined;
 }
 
 export type { Task, SessionBinding };

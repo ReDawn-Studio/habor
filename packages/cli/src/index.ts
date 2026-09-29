@@ -192,6 +192,8 @@ const HELP = `habor — 原生 Agent 聚合平台
   /effort [档位]        当前模型的思考强度；无参数时打开选择器
   /tasks                列出当前工作区任务（绑定链）
   /resume [任务 ID]     恢复当前工作区的历史任务
+  /trace [运行 ID]      查看当前任务的执行时间线
+  /files                查看当前任务记录的文件产物
   /new                  结束当前任务，开始新任务
   /status               当前任务 + 会话绑定
   /permission <ask|auto> 权限模式；ask 在工具执行前等待确认
@@ -508,9 +510,27 @@ async function handleCommand(line: string): Promise<boolean> {
         sb.push(`  模型: ${target.model} · 模型 ID: ${entry?.modelId ?? target.model}`);
         sb.push(`  来源: ${entry?.sourceKind === "local" ? "本地客户端登录和配置" : entry?.vendor ?? "未知"} → ${target.adapterId}`);
       }
+      if (task.harnessProfile) sb.push(`  Harness Profile: ${task.harnessProfile.name} · ${task.harnessProfile.id}`);
       sb.push(`  权限: ${permission}`);
       sb.push(`  思考强度: ${reasoningLabel(router.getReasoningEffort(currentTaskId))}（仅此模型与来源）`);
+      const latestRun = task.runs.at(-1);
+      if (latestRun) sb.push(`  最近运行: ${latestRun.id} · ${latestRun.status} · ${latestRun.elapsedMs == null ? "进行中" : `${Math.round(latestRun.elapsedMs / 100) / 10}s`} · 工具 ${latestRun.tools.length} · 文件 ${latestRun.artifactIds.length}`);
       out(sb.join("\n"));
+      return true;
+    }
+    case "/trace": {
+      if (!currentTaskId) { out(C.yellow("尚无当前任务。用 /model 选择一个模型。")); return true; }
+      const runs = router.trace(currentTaskId, arg || undefined);
+      if (tui) tui.openTrace(runs);
+      else if (!runs.length) out(C.yellow("当前任务还没有执行记录。"));
+      else out(runs.map(run => `${run.id}  ${run.status}  ${run.model}  ${run.elapsedMs == null ? "进行中" : `${Math.round(run.elapsedMs / 100) / 10}s`}  工具 ${run.tools.length}  文件 ${run.artifactIds.length}${run.error ? `\n  ✗ ${run.error.code ?? "error"}: ${run.error.message}` : ""}`).join("\n"));
+      return true;
+    }
+    case "/files": {
+      if (!currentTaskId) { out(C.yellow("尚无当前任务。用 /model 选择一个模型。")); return true; }
+      const artifacts = router.artifacts(currentTaskId);
+      if (tui) tui.openFiles(artifacts);
+      else out(artifacts.length ? artifacts.map(file => `${file.kind.toUpperCase()}  ${file.path}  +${file.added ?? 0} −${file.removed ?? 0}`).join("\n") : C.yellow("当前任务还没有记录到文件产物。"));
       return true;
     }
     case "/permission":
@@ -665,7 +685,7 @@ async function runPrompt(text: string): Promise<void> {
 
 // —— Tab 补全 ——
 
-const COMMANDS = ["model", "models", "providers", "agents", "login", "trust", "refresh", "effort", "new", "status", "tasks", "resume", "permission", "clear", "help", "quit", "exit"];
+const COMMANDS = ["model", "models", "providers", "agents", "login", "trust", "refresh", "effort", "new", "status", "tasks", "resume", "trace", "files", "permission", "clear", "help", "quit", "exit"];
 function completeLine(line: string): string[] {
   if (line.startsWith("/effort ")) {
     const model = currentTaskId ? router.status(currentTaskId).target?.model : undefined;
