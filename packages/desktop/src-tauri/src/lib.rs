@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::sync::Mutex;
-use tauri::{menu::{MenuBuilder, MenuItemBuilder, MenuItemKind, SubmenuBuilder}, tray::TrayIconBuilder, AppHandle, Manager, State};
+use tauri::{menu::{MenuBuilder, MenuItemBuilder, MenuItemKind, SubmenuBuilder}, tray::TrayIconBuilder, AppHandle, Emitter, Manager, State};
 
 #[derive(Default)]
 struct RuntimeState {
@@ -78,9 +78,27 @@ pub fn run() {
             let view_menu = SubmenuBuilder::with_id(app, "view", "View").item(&command_palette).build()?;
             let menu = MenuBuilder::new(app).item(&file_menu).item(&view_menu).build()?;
             app.set_menu(menu.clone())?;
+            let emit_menu_command = |app: &AppHandle, id: &str| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.emit("habor://menu-command", id);
+                }
+            };
+            app.on_menu_event(move |app, event| {
+                match event.id().as_ref() {
+                    "quit" => app.exit(0),
+                    "new-task" | "command-palette" => emit_menu_command(app, event.id().as_ref()),
+                    _ => {}
+                }
+            });
             TrayIconBuilder::with_id("habor-tray").icon(app.default_window_icon().expect("default icon").clone()).menu(&menu).on_menu_event(|app, event| {
-                if event.id().as_ref() == "quit" {
-                    app.exit(0);
+                match event.id().as_ref() {
+                    "quit" => app.exit(0),
+                    "new-task" | "command-palette" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.emit("habor://menu-command", event.id().as_ref());
+                        }
+                    }
+                    _ => {}
                 }
             }).build(app)?;
             let menu_handle = app.menu().expect("menu handle");

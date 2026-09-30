@@ -63,3 +63,24 @@ button { color: inherit; border: 0; cursor: pointer; }
 .suggestion-row button:hover { color: #eeeae2; border-color: #625b70; background: #1d1b20; }
 .suggestion-row button svg { color: #84799f; }
 .composer-hint { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The pre-release exposes only local task behavior that is implemented in the desktop shell. */
+.task-toolbar.simple { min-height: 58px; }
+.task-toolbar.simple .task-heading { width: 100%; }
+.task-toolbar.simple .status-pill { color: #bab7b0; }
+.task-toolbar.simple .status-pill .pulse { background: #8d8982; box-shadow: none; }
+.status-dot.draft { background: #8d8982; }
+.sidebar .primary-nav kbd { margin-left: auto; color: #63615d; font: 10px "DM Mono", monospace; }
+.sidebar-empty { padding: 8px 9px 12px; color: #5f5d59; font-size: 11px; }
+.sidebar-note { display: flex; align-items: flex-start; gap: 7px; padding: 0 8px 8px; color: #75716b; font-size: 10px; line-height: 1.45; }
+.sidebar-note svg { flex: 0 0 auto; color: #78a883; margin-top: 1px; }
+.sidebar-version { padding: 0 8px; color: #4e4c49; font: 9px "DM Mono", monospace; }
+.task-view { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+.local-task-header { display: flex; align-items: center; gap: 9px; max-width: 720px; width: min(720px, 85%); margin: 26px auto 0; padding: 10px 12px; border: 1px solid #272a2b; border-radius: 8px; color: #78a883; background: #111815; }
+.local-task-header > div { display: flex; flex-direction: column; gap: 3px; }
+.local-task-header strong { color: #b4d6bc; font-size: 11px; font-weight: 600; }
+.local-task-header span { color: #747f78; font-size: 10px; }
+.task-empty-note { max-width: 720px; margin: 16px auto; color: #6f6b65; font-size: 12px; text-align: center; }
+.local-mode { display: inline-flex; align-items: center; gap: 5px; color: #78a883; font-size: 10px; }
+.send-hint { color: #5f5d59; font-size: 10px; }
+.composer-bottom .send-btn { flex: 0 0 auto; }

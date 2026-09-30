@@ -12,16 +12,17 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
 
 - This is a native desktop application, not a website. Tauri 2 owns the window and system shell;
   React renders the workspace content inside it.
-- Solo mode stays simple and task-focused. Collaboration mode is the only place that expands the
-  model responsibility graph and workflow canvas.
+- The pre-release stays task-focused. It exposes local task drafts, recent tasks, command
+  navigation, language selection, and native shell actions only; collaboration and execution
+  surfaces return after the App Server contract exists.
 - The renderer must not access the filesystem or Agent processes directly. Rust Host commands and
   the future Node App Server sidecar are the boundary for task state, events, approvals, files,
   diffs, and history recovery.
 - Preserve the existing CLI and Router packages as the shared runtime contract while the desktop
   surface moves to interactive controls and panels.
-- Keep the first screen calm and task-first: New task, Search, Teams, Projects, Recent tasks,
-  Workflows, and Settings live in the left navigation. Files, Diff, and Verify open in the right
-  context panel without leaving the task; the collaboration graph remains a deliberate mode switch.
+- Keep the first screen calm and task-first: New task, Search, Recent tasks, and local quick starts
+  live in the left navigation. Do not add Agent, approval, Files, Diff, Verify, model, or
+  collaboration controls until their runtime behavior is connected.
 - The renderer uses locale catalogs for English, Simplified Chinese, Traditional Chinese, Japanese,
   Korean, and Spanish. The System choice follows the OS locale, stores the preference locally, and
   updates native Tauri menu labels when the command is available.

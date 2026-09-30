@@ -99,6 +99,16 @@
   "recentTasks": "Recent tasks",
   "workflows": "Workflows",
   "emptyTitle": "What are you working on?",
-  "emptySubtitle": "Start with a task, then keep the conversation, approvals, files, and verification in one workspace.",
-  "started": "Started 2m ago · 1 run"
+  "emptySubtitle": "Start a local task draft, then keep adding instructions in one desktop workspace.",
+  "started": "Started 2m ago · 1 run",
+  "localTask": "Local task",
+  "saved": "saved locally",
+  "localTaskDescription": "Saved on this device.",
+  "noRecentTasks": "No tasks yet",
+  "emptyTaskHistory": "Add the next instruction to this task.",
+  "sendHint": "Enter to send · Shift+Enter for a new line",
+  "focusComposer": "Focus task composer",
+  "starterTask": "Describe a task",
+  "starterPlan": "Make a plan",
+  "starterChecklist": "Write a checklist"
 }

@@ -4,15 +4,14 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md)
 
-habor 保留代码终端的直接感，同时给任务一个稳定的桌面工作区。在 **Solo** 中从一个模型开始，需要时切到 **Collaborate** 加入审查和验证；文件、Diff、审批和验证结果都留在当前任务里。
+habor 保留代码终端的直接感，同时给本地任务草稿一个稳定的桌面工作区。当前预发布版只开放本地任务、最近任务、命令面板、语言切换和原生窗口能力。
 
 ## 功能
 
 - **原生桌面壳**：Tauri 2 + Rust Host，支持 macOS 原生窗口、菜单、托盘和 Windows WebView2。
-- **Solo 工作台**：从干净的新建任务页开始，查看流式对话、工具活动、审批，并继续历史任务。
-- **协作流程**：只有进入 Collaborate 时才展开成员职责、审查门、并行工作和返工回路。
-- **任务上下文**：Files、Diff、Verify 作为右侧上下文面板打开，不离开当前对话。
-- **原生 Agent 路由**：继续复用现有 CLI、Router、ACP 和各家原生 harness。
+- **本地任务工作台**：创建任务草稿、追加指令，并在本机保存最近任务。
+- **原生桌面壳**：支持 Tauri 菜单、托盘、`⌘K` / `Ctrl+K` 命令面板和原生窗口行为。
+- **共享运行时边界**：现有 CLI、Router、ACP 和原生 harness 继续作为 Agent 的生产入口。
 - **多国语言**：英语、简体中文、繁体中文、日语、韩语、西班牙语；选择“跟随系统”即可使用系统语言。
 - **快捷键优先**：`⌘K` / `Ctrl+K` 打开命令面板，用于切换任务、视图和上下文面板。
 
@@ -36,7 +35,7 @@ pnpm --filter @agent-router/desktop tauri:dev
 
 ## 桌面端状态
 
-首版桌面端位于 `packages/desktop`，使用 Tauri 2 原生窗口、Rust 系统能力和 React 内容区。当前版本先验证 Solo / Collaborate、任务上下文、审批和多语言交互；Node App Server sidecar 会在下一步接入实时 Router 与 Agent 事件。
+首版桌面端位于 `packages/desktop`，使用 Tauri 2 原生窗口、Rust 系统能力和 React 内容区。当前版本只呈现已实现的本地任务和桌面壳能力；模型路由、实时 Agent、审批、文件、Diff、Verify 和协作流程会在 App Server 接入后再加入。
 
 ## 仓库结构
 
@@ -61,9 +60,10 @@ cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
 ## 路线图
 
 - [x] 共享 Router、ACP、原生 Agent 适配器和 CLI 任务状态
-- [x] Tauri 2 原生桌面壳及 Solo / Collaborate 工作台
-- [x] Files、Diff、Verify、审批、命令面板和多语言预览
+- [x] Tauri 2 原生桌面壳、本地任务、命令面板和多语言 UI
 - [ ] 接入桌面 App Server sidecar，订阅实时任务事件并恢复会话
+- [ ] 加入模型选择、原生 Agent、流式对话、工具、审批、Files、Diff 和 Verify
+- [ ] 加入 Collaborate 成员通信、独立审批和流程模板
 - [ ] CLI 与桌面窗口共享同一任务状态
 - [ ] 完善成员通信、独立审批和协作模板
 - [ ] 发布签名的 macOS、Windows、Linux 安装包

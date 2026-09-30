@@ -99,6 +99,16 @@
   "recentTasks": "最近のタスク",
   "workflows": "ワークフロー",
   "emptyTitle": "何に取り組みますか？",
-  "emptySubtitle": "タスクを始め、会話・承認・ファイル・検証を一つのワークスペースで管理します。",
-  "started": "2 分前に開始 · 1 回実行"
+  "emptySubtitle": "ローカルタスクの下書きを作り、同じデスクトップワークスペースで指示を追加します。",
+  "started": "2 分前に開始 · 1 回実行",
+  "localTask": "ローカルタスク",
+  "saved": "ローカルに保存済み",
+  "localTaskDescription": "このデバイスに保存されます。",
+  "noRecentTasks": "タスクはまだありません",
+  "emptyTaskHistory": "このタスクに次の指示を入力してください。",
+  "sendHint": "Enter で送信 · Shift+Enter で改行",
+  "focusComposer": "タスク入力にフォーカス",
+  "starterTask": "タスクを説明",
+  "starterPlan": "計画を作る",
+  "starterChecklist": "チェックリストを書く"
 }

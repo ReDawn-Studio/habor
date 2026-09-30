@@ -99,6 +99,16 @@
   "recentTasks": "Tareas recientes",
   "workflows": "Flujos de trabajo",
   "emptyTitle": "¿En qué estás trabajando?",
-  "emptySubtitle": "Empieza una tarea y conserva la conversación, las aprobaciones, los archivos y la verificación en un solo espacio.",
-  "started": "Iniciada hace 2 min · 1 ejecución"
+  "emptySubtitle": "Crea un borrador de tarea local y añade instrucciones en el mismo espacio de escritorio.",
+  "started": "Iniciada hace 2 min · 1 ejecución",
+  "localTask": "Tarea local",
+  "saved": "guardada localmente",
+  "localTaskDescription": "Guardado en este dispositivo.",
+  "noRecentTasks": "Aún no hay tareas",
+  "emptyTaskHistory": "Escribe la siguiente instrucción para esta tarea.",
+  "sendHint": "Enter para enviar · Shift+Enter para nueva línea",
+  "focusComposer": "Enfocar el compositor",
+  "starterTask": "Describir una tarea",
+  "starterPlan": "Crear un plan",
+  "starterChecklist": "Escribir una lista"
 }

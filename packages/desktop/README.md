@@ -11,13 +11,13 @@ Tauri Rust host
   └─ Node App Server sidecar
        └─ @agent-router/core + router + adapters + ACP + native agents
 React renderer
-  └─ Solo task workspace, Collaborate workflow, Files / Diff / Verify panels
+  └─ local task composer, recent task list, command palette, and language picker
 ```
 
-The current preview is a UI-first shell with a clean new-task home, localized navigation, and representative task data. It verifies the desktop
-information architecture and interaction model before wiring the Node App Server events into the
-renderer. The CLI remains the production task surface while the shared router and adapters are
-connected to the desktop host.
+The pre-release deliberately exposes only behavior implemented in the shell: local task drafts,
+recent task persistence, command navigation, locale selection, native menu labels, and native
+window/tray actions. The CLI remains the production Agent surface until the desktop App Server
+contract is connected.
 
 ## Development
 
@@ -33,7 +33,8 @@ pnpm --filter @agent-router/desktop tauri:build -- --bundles app
 ```
 
 The next integration step is to package a platform-specific `habor-app-server` Node sidecar and
-connect task, event, approval, file, diff, and resume actions through a narrow App Server protocol.
+connect live task events, model routing, approvals, Files, Diff, Verify, and resume actions through
+a narrow App Server protocol. Those controls are intentionally absent from this pre-release.
 
 ## Languages
 

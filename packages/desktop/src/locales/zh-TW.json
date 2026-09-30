@@ -99,6 +99,16 @@
   "recentTasks": "最近任務",
   "workflows": "工作流程",
   "emptyTitle": "你想完成什麼？",
-  "emptySubtitle": "從一個任務開始，在同一個工作台保留對話、核准、檔案和驗證結果。",
-  "started": "2 分鐘前開始 · 1 次執行"
+  "emptySubtitle": "建立本機任務草稿，然後在同一個桌面工作區繼續補充指令。",
+  "started": "2 分鐘前開始 · 1 次執行",
+  "localTask": "本機任務",
+  "saved": "已儲存到本機",
+  "localTaskDescription": "已儲存到此裝置。",
+  "noRecentTasks": "尚無任務",
+  "emptyTaskHistory": "繼續輸入這項任務的下一個指令。",
+  "sendHint": "Enter 傳送 · Shift+Enter 換行",
+  "focusComposer": "聚焦任務輸入框",
+  "starterTask": "描述任務",
+  "starterPlan": "制定計畫",
+  "starterChecklist": "寫檢查清單"
 }

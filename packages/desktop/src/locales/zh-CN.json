@@ -99,6 +99,16 @@
   "recentTasks": "最近任务",
   "workflows": "工作流",
   "emptyTitle": "你想完成什么？",
-  "emptySubtitle": "从一个任务开始，在同一个工作台里保留对话、审批、文件和验证结果。",
-  "started": "2 分钟前开始 · 1 次运行"
+  "emptySubtitle": "创建本地任务草稿，然后在同一个桌面工作区继续补充指令。",
+  "started": "2 分钟前开始 · 1 次运行",
+  "localTask": "本地任务",
+  "saved": "已保存到本地",
+  "localTaskDescription": "已保存到此设备。",
+  "noRecentTasks": "暂无任务",
+  "emptyTaskHistory": "继续输入这项任务的下一条指令。",
+  "sendHint": "Enter 发送 · Shift+Enter 换行",
+  "focusComposer": "聚焦任务输入框",
+  "starterTask": "描述任务",
+  "starterPlan": "制定计划",
+  "starterChecklist": "写检查清单"
 }

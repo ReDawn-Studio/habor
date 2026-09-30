@@ -99,6 +99,16 @@
   "recentTasks": "최근 작업",
   "workflows": "워크플로",
   "emptyTitle": "무엇을 하고 있나요?",
-  "emptySubtitle": "작업으로 시작해 대화, 승인, 파일, 검증을 한 작업 공간에서 관리하세요.",
-  "started": "2분 전 시작 · 1회 실행"
+  "emptySubtitle": "로컬 작업 초안을 만들고 같은 데스크톱 작업 공간에서 지시를 계속 추가하세요.",
+  "started": "2분 전 시작 · 1회 실행",
+  "localTask": "로컬 작업",
+  "saved": "로컬에 저장됨",
+  "localTaskDescription": "이 기기에 저장됩니다.",
+  "noRecentTasks": "아직 작업이 없습니다",
+  "emptyTaskHistory": "이 작업의 다음 지시를 입력하세요.",
+  "sendHint": "Enter 전송 · Shift+Enter 줄바꿈",
+  "focusComposer": "작업 입력에 포커스",
+  "starterTask": "작업 설명",
+  "starterPlan": "계획 만들기",
+  "starterChecklist": "체크리스트 작성"
 }
