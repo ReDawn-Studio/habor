@@ -19,3 +19,9 @@ Build app UI in `src/`. Keep `.openai/hosting.json`, `worker/index.js`, `scripts
   diffs, and history recovery.
 - Preserve the existing CLI and Router packages as the shared runtime contract while the desktop
   surface moves to interactive controls and panels.
+- Keep the first screen calm and task-first: New task, Search, Teams, Projects, Recent tasks,
+  Workflows, and Settings live in the left navigation. Files, Diff, and Verify open in the right
+  context panel without leaving the task; the collaboration graph remains a deliberate mode switch.
+- The renderer uses locale catalogs for English, Simplified Chinese, Traditional Chinese, Japanese,
+  Korean, and Spanish. The System choice follows the OS locale, stores the preference locally, and
+  updates native Tauri menu labels when the command is available.
