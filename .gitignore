@@ -4,6 +4,8 @@ node_modules/
 
 # build output
 packages/*/dist/
+packages/*/src-tauri/target/
+packages/*/src-tauri/gen/
 
 # state / local
 .myagent/

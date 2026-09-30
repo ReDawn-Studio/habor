@@ -26,6 +26,14 @@
 
 ## 终端对话
 
+### 桌面端预览
+
+桌面端首版位于 `packages/desktop`，使用 Tauri 2 原生窗口壳、Rust Host 和 React 工作台。Solo 模式保持简洁的任务对话，Collaborate 模式才展开成员职责与流程画布；后续 Node App Server 会复用 CLI 的 Router、ACP 和 Agent 运行时。
+
+```sh
+pnpm --filter @agent-router/desktop tauri:dev
+```
+
 要求 Node.js 22.19.0 或更新版本，以及 pnpm。下载 Release 源码或克隆仓库后执行：
 
 ```sh
