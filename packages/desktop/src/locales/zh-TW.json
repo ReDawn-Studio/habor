@@ -150,5 +150,14 @@
   "refresh": "重新整理",
   "auto": "自動",
   "workspacePath": "工作區路徑",
-  "openWorkspace": "開啟工作區"
+  "openWorkspace": "開啟工作區",
+  "history": "歷史任務",
+  "noHistory": "目前工作區沒有歷史任務",
+  "turns": "輪",
+  "login": "登入",
+  "loginStarted": "登入已啟動",
+  "addProvider": "新增提供商",
+  "providerName": "提供商名稱",
+  "apiKey": "API Key",
+  "saveProvider": "儲存提供商"
 }

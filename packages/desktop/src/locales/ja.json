@@ -150,5 +150,14 @@
   "refresh": "更新",
   "auto": "自動",
   "workspacePath": "ワークスペースのパス",
-  "openWorkspace": "ワークスペースを開く"
+  "openWorkspace": "ワークスペースを開く",
+  "history": "履歴",
+  "noHistory": "このワークスペースに履歴はありません",
+  "turns": "ターン",
+  "login": "ログイン",
+  "loginStarted": "ログインを開始しました",
+  "addProvider": "プロバイダーを追加",
+  "providerName": "プロバイダー名",
+  "apiKey": "API キー",
+  "saveProvider": "保存"
 }

@@ -150,5 +150,14 @@
   "refresh": "Refresh",
   "auto": "Automatic",
   "workspacePath": "작업 공간 경로",
-  "openWorkspace": "작업 공간 열기"
+  "openWorkspace": "작업 공간 열기",
+  "history": "기록",
+  "noHistory": "이 작업 공간에는 기록이 없습니다",
+  "turns": "회",
+  "login": "로그인",
+  "loginStarted": "로그인을 시작했습니다",
+  "addProvider": "제공자 추가",
+  "providerName": "제공자 이름",
+  "apiKey": "API 키",
+  "saveProvider": "저장"
 }

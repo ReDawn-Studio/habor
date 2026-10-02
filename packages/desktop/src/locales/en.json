@@ -150,5 +150,14 @@
   "refresh": "Refresh",
   "auto": "Automatic",
   "workspacePath": "Workspace path",
-  "openWorkspace": "Open workspace"
+  "openWorkspace": "Open workspace",
+  "history": "History",
+  "noHistory": "No history for this workspace",
+  "turns": "turns",
+  "login": "Login",
+  "loginStarted": "Login started",
+  "addProvider": "Add provider",
+  "providerName": "Provider name",
+  "apiKey": "API key",
+  "saveProvider": "Save provider"
 }

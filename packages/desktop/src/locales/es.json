@@ -150,5 +150,14 @@
   "refresh": "Refresh",
   "auto": "Automatic",
   "workspacePath": "Ruta del espacio de trabajo",
-  "openWorkspace": "Abrir espacio de trabajo"
+  "openWorkspace": "Abrir espacio de trabajo",
+  "history": "Historial",
+  "noHistory": "No hay historial para este espacio",
+  "turns": "turnos",
+  "login": "Iniciar sesión",
+  "loginStarted": "Inicio de sesión iniciado",
+  "addProvider": "Añadir proveedor",
+  "providerName": "Nombre del proveedor",
+  "apiKey": "Clave API",
+  "saveProvider": "Guardar proveedor"
 }
