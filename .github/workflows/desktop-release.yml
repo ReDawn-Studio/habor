@@ -32,8 +32,6 @@ jobs:
         include:
           - name: macOS Apple Silicon
             os: macos-14
-          - name: macOS Intel
-            os: macos-13
           - name: Windows x64
             os: windows-latest
           - name: Linux x64
