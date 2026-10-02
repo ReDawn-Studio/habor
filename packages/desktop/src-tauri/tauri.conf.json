@@ -4,9 +4,9 @@
   "version": "0.6.0",
   "identifier": "studio.redawn.habor",
   "build": {
-    "beforeDevCommand": "npm run prepare:runtime && npm run dev",
+    "beforeDevCommand": "pnpm --filter @agent-router/app-server build && npm run prepare:runtime && npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run prepare:runtime && npm run build",
+    "beforeBuildCommand": "pnpm --filter @agent-router/app-server build && npm run prepare:runtime && npm run build",
     "frontendDist": "../dist/client"
   },
   "app": {
