@@ -81,8 +81,16 @@ impl RuntimeState {
         let error_server=server.clone();
         std::thread::spawn(move || { for line in BufReader::new(errors).lines().map_while(Result::ok) { let mut log=error_server.diagnostics.lock().unwrap(); log.push_str(&line);log.push('\n'); if log.len()>8000 {*log=log.chars().rev().take(4000).collect::<String>().chars().rev().collect();} } });
         *slot=Some(server.clone());
-        let workspace = workspace_root().map_err(|e| e.to_string())?;
-        server.request("workspace.open".into(), serde_json::json!({"path": workspace}))?;
+        // Preserve the workspace selected in the desktop service. The old startup
+        // path always called `workspace.open` with the bundle's current directory
+        // (usually `/`), which silently moved the task context away from the CLI's
+        // workspace on every launch. Only seed a workspace for a fresh install.
+        let snapshot = server.request("snapshot".into(), serde_json::json!({}))?;
+        let current = snapshot.get("cwd").and_then(Value::as_str).filter(|path| !path.is_empty());
+        if current.is_none() {
+            let workspace = default_workspace().map_err(|e| e.to_string())?;
+            server.request("workspace.open".into(), serde_json::json!({"path": workspace}))?;
+        }
         Ok(server)
     }
     pub fn shutdown(&self) { if let Some(server)=self.server.lock().unwrap().take(){server.shutdown();} }
@@ -92,12 +100,12 @@ fn runtime_path(app:&AppHandle)->Result<PathBuf,String>{
     { let dev=PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime"); if dev.exists(){return Ok(dev);} }
     app.path().resource_dir().map(|p|p.join("runtime")).map_err(|e|e.to_string())
 }
-fn workspace_root() -> Result<PathBuf, std::io::Error> {
-    let mut current = std::env::current_dir()?;
-    loop {
-        if current.join("pnpm-workspace.yaml").exists() || current.join(".git").exists() { return Ok(current); }
-        if !current.pop() { return std::env::current_dir(); }
+fn default_workspace() -> Result<PathBuf, std::io::Error> {
+    if let Some(home) = std::env::var_os("HOME") {
+        let path = PathBuf::from(home);
+        if path.is_dir() { return Ok(path); }
     }
+    std::env::current_dir()
 }
 #[tauri::command]
 pub async fn server_request(app:AppHandle, method:String, params:Value)->Result<Value,String>{
