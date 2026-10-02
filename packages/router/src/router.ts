@@ -89,6 +89,17 @@ export class TaskRouter {
     const old = this.tasks.currentTarget(task);
     if (old && old.model === model) return task; // 同模型：无操作
 
+    if (this.activeTurns.has(taskId)) throw new Error("请先停止当前回合再切换模型");
+    const reasoningEffort = opts && Object.hasOwn(opts, "reasoningEffort") ? opts.reasoningEffort : this.savedEffort(task, model);
+    // Validate/create the replacement before discarding the working session.
+    // Failed authentication or unavailable clients must leave the old binding usable.
+    const replacement = await this.registry.createSession(model, {
+      cwd: task.cwd,
+      permission: opts?.permission ?? (task.meta.permission as "ask" | "auto"),
+      reasoningEffort,
+      onPermission: this.onPermissionWithTask ? request => this.onPermissionWithTask!(request, task.id) : this.onPermission
+    });
+
     // 切换前捕获上下文快照（供新 harness 接续）
     const lastTurns = this.tasks.lastTurns(task, 10);
     this.tasks.captureSnapshot(task, {
@@ -113,8 +124,11 @@ export class TaskRouter {
       }
     }
 
-    const reasoningEffort = opts && Object.hasOwn(opts, "reasoningEffort") ? opts.reasoningEffort : this.savedEffort(task, model);
-    await this.routeAndBind(task, { model, reason: "switch", permission: opts?.permission, reasoningEffort });
+    this.sessions.set(replacement.id, replacement);
+    task.meta.permission = opts?.permission ?? task.meta.permission;
+    task.harnessProfile = this.registry.profile(model, { permission: task.meta.permission as "ask" | "auto", reasoningEffort });
+    this.rememberEffort(task, model, reasoningEffort);
+    this.tasks.bindSession(task, { sessionId: replacement.id, adapterId: replacement.adapterId, model, reason: "switch" });
     return task;
   }
 

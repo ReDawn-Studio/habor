@@ -33,7 +33,7 @@ export class DesktopService {
     this.providers = new ProviderStore(stateDir); this.trust = new WorkspaceTrust(stateDir);
     this.efforts = new ReasoningPreferences(stateDir); this.installer = new AgentInstaller(stateDir);
     this.emitRaw = emit; this.pending = new Map(); this.jobs = new Map(); this.operations = new Map(); this.secrets = [];
-    this.availability = {}; this.sequence = 0; this.closed = false;
+    this.switches = new Map(); this.availability = {}; this.sequence = 0; this.closed = false;
     const runtime = createRouter(adapters,{onPermissionWithTask:(request,taskId)=>this.permission(request,taskId)});
     Object.assign(this,runtime);
     this.registry.configure(this.providers.entries(),entry => { const connection=this.providers.connection(entry); if(connection?.apiKey) this.secrets.push(connection.apiKey); return connection; });
@@ -55,11 +55,11 @@ export class DesktopService {
   saveConfig() { atomic(this.configFile,JSON.stringify(this.config,null,2)); }
   changed(task) { task.updatedAt=Date.now(); this.publish({type:'task', task:this.publicTask(task)}); }
   publicTask(task) {
-    return structuredClone({ ...task, meta:{...task.meta, desktop:{...this.meta(task), busy:this.jobs.has(task.id)}}, approvals:[...this.pending].filter(([,p])=>p.taskId===task.id).map(([id,p])=>({...p.request, id,taskId:p.taskId,memberId:p.memberId})) });
+    return structuredClone({ ...task, meta:{...task.meta, desktop:{...this.meta(task), busy:this.jobs.has(task.id), switching:this.switches.has(task.id)}}, approvals:[...this.pending].filter(([,p])=>p.taskId===task.id).map(([id,p])=>({...p.request, id,taskId:p.taskId,memberId:p.memberId})) });
   }
   requireWorkspace() { const cwd=this.config.cwd; if(!cwd || !this.trust.isTrusted(cwd)) throw new Error('Trust the selected workspace first'); return cwd; }
   requireTask(id) { const task=this.router.getTask(text(id,'task ID',100)); if(!task || task.cwd!==this.requireWorkspace()) throw new Error('Task is outside this workspace or does not exist'); return task; }
-  idle(task) { if(this.jobs.has(task.id)) throw new Error('Stop the running task before changing its configuration'); }
+  idle(task) { if(this.jobs.has(task.id) || this.switches.has(task.id)) throw new Error('Stop the running task before changing its configuration'); }
   async snapshot(refresh = false) {
     const cwd=this.config.cwd, trusted=!!cwd && this.trust.isTrusted(cwd);
     if(trusted && (refresh || !Object.keys(this.availability).length)) this.availability=await this.registry.availableAdapters();
@@ -67,7 +67,7 @@ export class DesktopService {
       tasks:trusted?this.tasks.listTasksForCwd(cwd).map(t=>this.publicTask(t)):[],
       providers:trusted?this.providers.list().map(p=>({...p,hasKey:this.providers.hasKey(p.id)})):[],
       agents:trusted?Object.entries(AGENT_SETUP).map(([id,spec])=>({id,name:spec.name,url:spec.url,installed:!!this.availability[id],auth:AUTH_ACTIONS[id]??[],install:AGENT_RUNTIMES[id]?.package?installPlan(id,this.dir):null})):[],
-      operations:[...this.operations.values()].map(({controller,process,...rest})=>rest), seq:this.sequence};
+      preferredModel:this.providers.preferredModel(this.registry.listModels())?.model, operations:[...this.operations.values()].map(({controller,process,completion,...rest})=>rest), seq:this.sequence};
   }
   async permission(request,taskId) {
     const task=this.router.getTask(taskId), id=randomUUID(), memberId=this.jobs.get(taskId)?.memberId;
@@ -89,6 +89,7 @@ export class DesktopService {
     if(job.cancelled) return;
     const meta=this.meta(task); meta.status='connecting'; meta.error=null;meta.live='';meta.thinking='';
     const before=task.conversation.length;
+    meta.pendingInput=input;
     let lastPublish=0;
     const prompt = member ? `Your assigned responsibility: ${member.role}\n${member.instructions || ''}\n\n${input}\n\nTeam messages:\n${meta.messages.filter(m=>!m.to||m.to===member.id).slice(-12).map(m=>`${m.from}: ${m.text}`).join('\n')}`:input;
     this.changed(task);
@@ -99,8 +100,9 @@ export class DesktopService {
       if(event.type==='thinking') meta.thinking=event.delta!==undefined?meta.thinking+event.delta:event.thinking??event.text??meta.thinking;
       if(event.type!=='message'&&event.type!=='thinking') { meta.events.push({ ...event, memberId:member?.id });meta.events=meta.events.slice(-200); }
       if(event.type==='error') meta.error=event.error?.message || 'Agent error';
-      if(Date.now()-lastPublish>80 || !['message','thinking'].includes(event.type)){this.changed(task);lastPublish=Date.now();}
+      if(Date.now()-lastPublish>80 || !['message','thinking'].includes(event.type)){this.changed(task);lastPublish=Date.now();this.persist();}
     }
+    meta.pendingInput='';
     if(task.conversation.length>before && task.conversation.at(-1)?.role==='assistant') meta.live='';
     if(meta.error || task.runs.at(-1)?.status==='failed') throw new Error(meta.error||task.runs.at(-1).error?.message||'Agent failed');
   }
@@ -128,11 +130,30 @@ export class DesktopService {
         } else await this.runTurn(task,input,job);
         meta.status=job.cancelled?'cancelled':'completed';
       } catch(error){meta.status=job.cancelled?'cancelled':'failed';meta.error=this.safeError(error);if(meta.workflow?.status==='running')meta.workflow.status=meta.status;const member=meta.members.find(m=>m.id===job.memberId);if(member)member.status=meta.status;}
-      finally {this.denyPending(task.id);this.jobs.delete(task.id);this.persist();this.changed(task);}
+      finally {meta.pendingInput='';if(task.conversation.at(-1)?.role==='assistant')meta.live='';this.denyPending(task.id);this.jobs.delete(task.id);this.persist();this.changed(task);}
     })();
     this.changed(task);return {accepted:true,taskId:task.id};
   }
-  async stop(task) { const job=this.jobs.get(task.id);if(job)job.cancelled=true;this.denyPending(task.id);await this.router.cancelTask(task.id);await job?.completion;return this.publicTask(task); }
+  async switchModel(task, model) {
+    if (!this.registry.entry(model)) throw new Error('Unknown model');
+    if (this.switches.has(task.id)) throw new Error('A model switch is already in progress');
+    if (this.tasks.currentTarget(task)?.model === model) return this.publicTask(task);
+    if (!await this.router.isModelAvailable(model)) throw new Error('Install the selected native Agent before switching');
+    if (this.switches.has(task.id)) throw new Error('A model switch is already in progress');
+    const meta=this.meta(task); this.switches.set(task.id, true); this.changed(task);
+    try {
+      if(this.jobs.has(task.id)) await this.stop(task);
+      await this.router.switchTaskModel(task.id,model,{permission:task.meta.permission});
+      this.providers.rememberModel(this.registry.entry(model)); meta.status='idle';meta.error=null;
+    } catch(error) {meta.error=this.safeError(error);throw error;}
+    finally {this.switches.delete(task.id);this.persist();this.changed(task);}
+    return this.publicTask(task);
+  }
+  async stop(task) {
+    const job=this.jobs.get(task.id);if(job)job.cancelled=true;this.denyPending(task.id);
+    if(job?.child) await stopProcess(job.child); else await this.router.cancelTask(task.id);
+    await job?.completion;return this.publicTask(task);
+  }
   operation(type,adapterId,execute) {
     if([...this.operations.values()].some(o=>o.status==='running'&&o.adapterId===adapterId)) throw new Error('An operation is already running for this agent');
     const id=randomUUID(),op={id,type,adapterId,status:'running',output:'',controller:new AbortController()};this.operations.set(id,op);
@@ -155,7 +176,7 @@ export class DesktopService {
     if(method==='tasks.create') return this.publicTask(await this.newTask(p));
     if(method==='tasks.send') return this.start(this.requireTask(p.taskId),text(p.input,'message'),{memberId:p.memberId,workflow:!!p.workflow});
     if(method==='tasks.cancel') return this.stop(this.requireTask(p.taskId));
-    if(method==='tasks.model') {const task=this.requireTask(p.taskId);if(this.jobs.has(task.id)) await this.stop(task);this.idle(task);await this.router.switchTaskModel(task.id,text(p.model,'model',200),{permission:task.meta.permission});this.persist();this.changed(task);return this.publicTask(task);}
+    if(method==='tasks.model') return this.switchModel(this.requireTask(p.taskId), text(p.model,'model',200));
     if(method==='tasks.permission') {const task=this.requireTask(p.taskId);this.idle(task);if(!['ask','auto'].includes(p.permission))throw new Error('Invalid permission');task.meta.permission=p.permission;if(task.harnessProfile)task.harnessProfile.permission=p.permission;await this.router.refreshSession(task.id);this.persist();this.changed(task);return this.publicTask(task);}
     if(method==='tasks.reasoning') {const task=this.requireTask(p.taskId);this.idle(task);return {capabilities:await this.router.reasoningCapabilities(task.id),effort:this.router.getReasoningEffort(task.id)};}
     if(method==='tasks.effort') {const task=this.requireTask(p.taskId);this.idle(task);await this.router.setReasoningEffort(task.id,p.effort||undefined);const entry=this.registry.entry(this.tasks.currentTarget(task).model);this.efforts.set(entry,p.effort||undefined);this.persist();return {ok:true};}
