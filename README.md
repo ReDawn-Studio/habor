@@ -86,6 +86,7 @@ packages/
 ├── adapters/   native ACP clients and legacy bridges
 ├── cli/        habor terminal client
 ├── dsh-acp/    DeepSeek Harness ACP server
+├── app-server/ shared desktop / CLI task service boundary
 └── desktop/    Tauri 2 shell and React workbench
 ```
 

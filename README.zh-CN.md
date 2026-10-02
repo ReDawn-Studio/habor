@@ -49,6 +49,7 @@ packages/
 ├── adapters/   原生 ACP 客户端和 legacy bridge
 ├── cli/        habor 终端客户端
 ├── dsh-acp/    DeepSeek Harness ACP server
+├── app-server/ 桌面端与 CLI 共用的任务服务边界
 └── desktop/    Tauri 2 壳和 React 工作台
 ```
 
