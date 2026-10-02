@@ -87,8 +87,13 @@ impl RuntimeState {
         // workspace on every launch. Only seed a workspace for a fresh install.
         let snapshot = server.request("snapshot".into(), serde_json::json!({}))?;
         let current = snapshot.get("cwd").and_then(Value::as_str).filter(|path| !path.is_empty());
-        if current.is_none() {
-            let workspace = default_workspace().map_err(|e| e.to_string())?;
+        let legacy_workspace = if current == Some("/") {
+            snapshot.get("projects").and_then(Value::as_array).and_then(|projects| {
+                projects.iter().filter_map(Value::as_str).find(|path| *path != "/" && PathBuf::from(path).is_dir())
+            })
+        } else { None };
+        if current.is_none() || legacy_workspace.is_some() {
+            let workspace = legacy_workspace.map(PathBuf::from).unwrap_or(default_workspace().map_err(|e| e.to_string())?);
             server.request("workspace.open".into(), serde_json::json!({"path": workspace}))?;
         }
         Ok(server)
