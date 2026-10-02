@@ -19,13 +19,15 @@ export interface TaskRouterOptions {
   /** 会话绑定持久目录（可选；留空则不落盘） */
   stateFile?: string;
   onPermission?: SessionOptions["onPermission"];
+  onPermissionWithTask?: (request: Parameters<NonNullable<SessionOptions["onPermission"]>>[0], taskId: string) => ReturnType<NonNullable<SessionOptions["onPermission"]>>;
 }
 
 export class TaskRouter {
   private sessions = new Map<string, Session>();
   private activeTurns = new Map<string, AbortController>();
   private stateFile: string | undefined;
-  private onPermission: SessionOptions["onPermission"];
+  private onPermission: TaskRouterOptions["onPermission"];
+  private onPermissionWithTask: TaskRouterOptions["onPermissionWithTask"];
 
   constructor(
     private registry: Registry,
@@ -34,6 +36,7 @@ export class TaskRouter {
   ) {
     this.stateFile = opts.stateFile;
     this.onPermission = opts.onPermission;
+    this.onPermissionWithTask = opts.onPermissionWithTask;
   }
 
   /** 模型可用性（委托给 Registry；CLI/IDE 用）。 */
@@ -147,7 +150,7 @@ export class TaskRouter {
         cwd: task.cwd,
         permission: (task.meta.permission as "ask" | "auto") ?? "auto",
         reasoningEffort: this.savedEffort(task, target.model),
-        onPermission: this.onPermission
+        onPermission: this.onPermissionWithTask ? request => this.onPermissionWithTask!(request, task.id) : this.onPermission
       });
       // 新 session id，但绑定指向原 adapterId —— harness 不变
       this.sessions.set(target.sessionId, session);
@@ -283,7 +286,7 @@ export class TaskRouter {
     if (!target) throw new Error("请先选择模型");
     let session = this.sessions.get(target.sessionId);
     if (!session) {
-      session = await this.registry.createSession(target.model, { cwd: task.cwd, permission: task.meta.permission as "ask" | "auto", reasoningEffort: this.savedEffort(task, target.model), onPermission: this.onPermission });
+      session = await this.registry.createSession(target.model, { cwd: task.cwd, permission: task.meta.permission as "ask" | "auto", reasoningEffort: this.savedEffort(task, target.model), onPermission: this.onPermissionWithTask ? request => this.onPermissionWithTask!(request, task.id) : this.onPermission });
       this.sessions.set(target.sessionId, session);
     }
     const entry = this.registry.entry(target.model)!;
@@ -358,7 +361,7 @@ export class TaskRouter {
       cwd: task.cwd,
       permission: opts.permission ?? ((task.meta.permission as "ask" | "auto") ?? "auto"),
       reasoningEffort: opts.reasoningEffort,
-      onPermission: this.onPermission
+      onPermission: this.onPermissionWithTask ? request => this.onPermissionWithTask!(request, task.id) : this.onPermission
     });
     this.sessions.set(session.id, session);
     task.meta.permission = opts.permission ?? task.meta.permission;

@@ -4,12 +4,15 @@
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Español](README.es.md)
 
-habor keeps the familiar feel of a code terminal while giving local task drafts a durable desktop home. Start a task, continue its instructions, switch languages, and use the command palette without leaving the native window.
+habor keeps the familiar feel of a code terminal while giving the same Router task a durable desktop home. Choose a real native Agent, stream its work, approve actions, inspect files and diffs, switch models, and continue the task from the desktop or CLI.
 
 ## What it does
 
 - **Native desktop shell** — Tauri 2 with a Rust host, native menus, macOS traffic lights, tray support, and Windows WebView2 packaging.
-- **Local task workbench** — create a task draft, add instructions, and keep the recent task list on the device.
+- **Task workbench** — create trusted workspace tasks, select a real model and native Agent, stream events, approve actions, and resume history.
+- **CLI parity at the service boundary** — the desktop reuses the CLI's Router, ACP adapters, provider store, Agent installer, authentication status, task affinity, and recovery state.
+- **Files, Diff, Verify** — inspect workspace files safely, read the current Git diff, and run an explicitly selected package verification script.
+- **Team workflows** — assign member roles and models, pass messages between members, run a sequential review workflow, and save reusable templates.
 - **Native shell** — use the Tauri menu, tray, `⌘K` / `Ctrl+K` command palette, and native window behavior.
 - **Shared runtime boundary** — the existing CLI, Router, ACP, and native harness integrations remain the production Agent surface.
 - **Cross-platform UI** — English, Simplified Chinese, Traditional Chinese, Japanese, Korean, and Spanish are available from the desktop language picker. “System” follows the OS locale.
@@ -17,14 +20,22 @@ habor keeps the familiar feel of a code terminal while giving local task drafts 
 
 ## Current desktop preview
 
-The first desktop version is available in `packages/desktop`. It is a native Tauri window with a React content area and a Rust system host. This pre-release intentionally exposes only local task drafting, recent task persistence, command navigation, language selection, and native shell actions.
+The first desktop version is available in `packages/desktop`. It is a native Tauri window with a React content area, a Rust system host, and a Node App Server sidecar. The sidecar is the shared service boundary for the desktop and CLI runtime.
 
 ```text
 Tauri Rust host
   ├─ native window, menu, shortcut, tray, process boundary
-  └─ localized menu labels
+  └─ localized menu labels and sidecar supervision
+Node App Server
+  ├─ Router + ACP + native Agent sessions
+  ├─ task state, approvals, model switching, and history recovery
+  ├─ workspace files, Git diff, verification, and team workflows
+  └─ provider configuration and Agent install/auth operations
 React workbench
-  ├─ local task composer and recent task list
+  ├─ model / permission task composer
+  ├─ streaming conversation, approvals, and execution activity
+  ├─ Files / Diff / Verify context panels
+  └─ team members, role handoff, and workflow templates
   ├─ command palette
   └─ six locale catalogs
 ```
@@ -78,7 +89,7 @@ packages/
 └── desktop/    Tauri 2 shell and React workbench
 ```
 
-The desktop renderer only owns local task presentation and user intent. Filesystem access, Agent processes, live task events, approvals, model routing, files, diffs, verification, and collaboration stay out of this pre-release until the App Server contract is connected.
+The desktop renderer only owns presentation and user intent. Filesystem access, Agent processes, task events, approvals, model routing, files, diffs, verification, and collaboration go through the App Server boundary; the renderer never accesses them directly.
 
 ## Language support
 
@@ -95,12 +106,13 @@ cargo check --manifest-path packages/desktop/src-tauri/Cargo.toml
 ## Roadmap
 
 - [x] Shared Router, ACP, native Agent adapters, and CLI task state
-- [x] Tauri 2 native desktop shell, local task drafts, command palette, and localized UI
-- [ ] Connect the desktop App Server sidecar to live task events and session recovery
-- [ ] Add model selection and native Agent routing to desktop tasks
-- [ ] Add streaming conversation, tools, approvals, Files, Diff, and Verify
-- [ ] Add Collaborate mode with member messaging, independent approvals, and saved workflows
-- [ ] Reuse the same task state across CLI and desktop windows
+- [x] Tauri 2 native desktop shell, App Server sidecar, command palette, and localized UI
+- [x] Model selection, native Agent routing, streaming task events, approvals, and task recovery
+- [x] Files, Git Diff, verification scripts, model switching, provider state, and Agent operations
+- [x] Collaborate mode with member roles, handoff messages, sequential workflows, and templates
+- [x] Bundle a Node runtime and the App Server into the desktop application
+- [ ] Sign and notarize distribution builds
+- [ ] Add parallel team execution and visual branching conditions
 - [ ] Package signed macOS, Windows, and Linux releases
 
 ## Contributing

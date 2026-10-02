@@ -16,3 +16,6 @@ packages/*/src-tauri/gen/
 .DS_Store
 .idea/
 .vscode/
+
+# Generated desktop runtime
+packages/desktop/src-tauri/runtime/

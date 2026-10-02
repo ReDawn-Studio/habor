@@ -1,4 +1,4 @@
-# Desktop pre-release design QA
+# Desktop workbench design QA
 
 **source visual truth path**
 
@@ -11,13 +11,13 @@
 
 **state and viewport**
 
-- Desktop dark theme, empty local task state, macOS system locale, 1440 × 900 logical app target.
-- The reference contains an active Agent task; this pre-release intentionally shows only the implemented local task state. Agent execution and collaboration are documented as future work.
+- Desktop dark theme, trusted workspace / empty task state, macOS system locale, 1440 × 900 logical app target.
+- The reference contains an active Agent task; the implementation now reaches the same state through the App Server after a workspace is trusted and a model is selected.
 
 **Full-view comparison evidence**
 
 - The stable desktop skeleton remains: quiet left navigation, one central task composer, and native titlebar controls.
-- The pre-release is calmer than the reference because it removes controls whose backing runtime is not connected yet.
+- The implementation keeps execution controls inside the task and reveals context panels only when requested.
 - The composer and recent-task list are the strongest visual focus, with no fake execution cards or status claims.
 
 **Focused region comparison evidence**
@@ -32,15 +32,15 @@
 - Spacing and layout rhythm: fixed navigation with a flexible task column and a centered composer.
 - Colors and visual tokens: dark neutral shell, peach accent, muted green local-save state, and low-contrast secondary copy.
 - Image quality and asset fidelity: no reference imagery is required; Phosphor supplies consistent vector icons.
-- Copy and content: visible UI copy describes local task behavior and does not claim Agent execution.
+- Copy and content: visible UI copy distinguishes workspace trust, model availability, native Agent status, and execution state.
 
 **Findings**
 
-- No actionable P0/P1/P2 visual findings remain for the implemented pre-release scope.
+- No actionable P0/P1/P2 visual findings remain for the implemented desktop scope.
 
 **Open Questions**
 
-- App Server integration will define the future task event, approval, file, diff, verification, model, and collaboration surfaces.
+- The App Server remains the live runtime boundary; release packaging should continue to verify that its bundled Node runtime is present.
 
 **Implementation Checklist**
 
@@ -48,7 +48,7 @@
 - [x] Command palette and native menu command events
 - [x] Multi-language renderer and native menu labels
 - [x] Native Tauri window, tray, and cross-platform shell configuration
-- [x] Removed unimplemented Agent, approval, file, diff, verify, model, and collaboration controls
+- [x] Agent, approval, file, diff, verify, model, and collaboration controls are backed by App Server calls
 
 **Follow-up Polish**
 

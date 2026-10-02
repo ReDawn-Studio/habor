@@ -24,6 +24,28 @@ importers:
         specifier: ^1.4.0
         version: 1.4.0(zod@4.5.1)
 
+  packages/app-server:
+    dependencies:
+      '@agent-router/adapters':
+        specifier: workspace:*
+        version: link:../adapters
+      '@agent-router/cli':
+        specifier: workspace:*
+        version: link:../cli
+      '@agent-router/core':
+        specifier: workspace:*
+        version: link:../core
+      '@agent-router/dsh-acp':
+        specifier: workspace:*
+        version: link:../dsh-acp
+      '@agent-router/router':
+        specifier: workspace:*
+        version: link:../router
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.0
+
   packages/cli:
     dependencies:
       '@agent-router/adapters':
@@ -40,6 +62,9 @@ importers:
 
   packages/desktop:
     dependencies:
+      '@agent-router/app-server':
+        specifier: workspace:*
+        version: link:../app-server
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.0(react@19.2.0))(react@19.2.0)

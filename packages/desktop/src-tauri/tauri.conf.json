@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "habor",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "identifier": "studio.redawn.habor",
   "build": {
-    "beforeDevCommand": "npm run dev -- --host 0.0.0.0",
+    "beforeDevCommand": "npm run prepare:runtime && npm run dev",
     "devUrl": "http://localhost:5173",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run prepare:runtime && npm run build",
     "frontendDist": "../dist/client"
   },
   "app": {
@@ -24,16 +24,30 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' http://localhost:* ws://localhost:*;"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+    "resources": {
+      "runtime/": "runtime/"
     },
-    "macOS": { "minimumSystemVersion": "10.15" },
-    "linux": { "deb": { "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"] } }
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    }
   }
 }

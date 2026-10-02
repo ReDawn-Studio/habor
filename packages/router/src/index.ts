@@ -18,10 +18,10 @@ export { MODEL_CATALOG, listModels, adapterIdForModel } from "./registry.js";
 import type { Adapter, SessionOptions } from "@agent-router/core";
 import { Registry } from "./registry.js";
 import { TaskStore } from "./state.js";
-import { TaskRouter } from "./router.js";
+import { TaskRouter, type TaskRouterOptions } from "./router.js";
 
 /** 便捷组装：注入 adapters，返回带完整注册的 TaskRouter。 */
-export function createRouter(adapters: Adapter[], opts: { stateFile?: string; onPermission?: SessionOptions["onPermission"] } = {}): {
+export function createRouter(adapters: Adapter[], opts: TaskRouterOptions = {}): {
   router: TaskRouter;
   registry: Registry;
   tasks: TaskStore;

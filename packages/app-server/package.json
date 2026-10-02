@@ -1,0 +1,21 @@
+{
+  "name": "@agent-router/app-server",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node dist/index.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  },
+  "dependencies": {
+    "@agent-router/adapters": "workspace:*",
+    "@agent-router/cli": "workspace:*",
+    "@agent-router/core": "workspace:*",
+    "@agent-router/router": "workspace:*",
+    "@agent-router/dsh-acp": "workspace:*"
+  }
+}

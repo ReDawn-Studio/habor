@@ -1,6 +1,6 @@
 {
   "name": "@agent-router/desktop",
-  "version": "0.0.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,8 +12,10 @@
     "preview": "vite preview",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "test:i18n": "node --test tests/i18n.test.mjs"
+    ,"prepare:runtime": "node scripts/prepare-runtime.mjs"
   },
   "dependencies": {
+    "@agent-router/app-server": "workspace:*",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-popover": "^1.1.23",

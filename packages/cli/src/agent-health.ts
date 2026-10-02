@@ -39,6 +39,6 @@ async function main(id: string): Promise<void> {
   console.log("本地启动与协议握手检查通过；账号和模型权限将在连接时验证");
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[2] === "--probe-agent" && process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main(process.argv[3] ?? "").catch(error => { console.error(safeProcessText(error instanceof Error ? error.message : String(error))); process.exitCode = 1; });
 }

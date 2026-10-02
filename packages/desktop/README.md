@@ -11,13 +11,13 @@ Tauri Rust host
   └─ Node App Server sidecar
        └─ @agent-router/core + router + adapters + ACP + native agents
 React renderer
-  └─ local task composer, recent task list, command palette, and language picker
+  └─ task composer, streaming conversation, approvals, context panels, team workflow, and language picker
 ```
 
-The pre-release deliberately exposes only behavior implemented in the shell: local task drafts,
-recent task persistence, command navigation, locale selection, native menu labels, and native
-window/tray actions. The CLI remains the production Agent surface until the desktop App Server
-contract is connected.
+The desktop now connects to `packages/app-server`, which reuses the CLI Router, ACP adapters,
+provider store, Agent installer, and task state. The implemented surface includes model and
+permission selection, streaming task events, approvals, model switching, Files / Diff / Verify,
+Agent operations, history recovery, and sequential team workflows.
 
 ## Development
 
@@ -32,9 +32,9 @@ iteration. The packaged macOS app can be built with:
 pnpm --filter @agent-router/desktop tauri:build -- --bundles app
 ```
 
-The next integration step is to package a platform-specific `habor-app-server` Node sidecar and
-connect live task events, model routing, approvals, Files, Diff, Verify, and resume actions through
-a narrow App Server protocol. Those controls are intentionally absent from this pre-release.
+The next integration step is signing and notarizing distribution builds, then adding parallel team
+execution with visual branch conditions. The bundled runtime keeps the service protocol as the
+boundary between native Rust supervision and the React renderer.
 
 ## Languages
 
