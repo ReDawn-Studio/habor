@@ -159,5 +159,11 @@
   "addProvider": "Add provider",
   "providerName": "Provider name",
   "apiKey": "API key",
-  "saveProvider": "Save provider"
+  "saveProvider": "Save provider",
+  "thinking": "Thought process",
+  "thinkingLive": "Thinking",
+  "thinkingDone": "Thought complete",
+  "showThinking": "Show details",
+  "hideThinking": "Hide details",
+  "thinkingPlaceholder": "The agent is analyzing the request and preparing the next step."
 }

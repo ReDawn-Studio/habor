@@ -159,5 +159,11 @@
   "addProvider": "新增提供商",
   "providerName": "提供商名稱",
   "apiKey": "API Key",
-  "saveProvider": "儲存提供商"
+  "saveProvider": "儲存提供商",
+  "thinking": "思考過程",
+  "thinkingLive": "正在思考",
+  "thinkingDone": "思考完成",
+  "showThinking": "展開詳情",
+  "hideThinking": "收起詳情",
+  "thinkingPlaceholder": "Agent 正在分析請求並準備下一步。"
 }

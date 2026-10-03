@@ -159,5 +159,11 @@
   "addProvider": "Añadir proveedor",
   "providerName": "Nombre del proveedor",
   "apiKey": "Clave API",
-  "saveProvider": "Guardar proveedor"
+  "saveProvider": "Guardar proveedor",
+  "thinking": "Proceso de pensamiento",
+  "thinkingLive": "Pensando",
+  "thinkingDone": "Pensamiento completado",
+  "showThinking": "Mostrar detalles",
+  "hideThinking": "Ocultar detalles",
+  "thinkingPlaceholder": "El agente está analizando la solicitud y preparando el siguiente paso."
 }

@@ -159,5 +159,11 @@
   "addProvider": "プロバイダーを追加",
   "providerName": "プロバイダー名",
   "apiKey": "API キー",
-  "saveProvider": "保存"
+  "saveProvider": "保存",
+  "thinking": "思考プロセス",
+  "thinkingLive": "思考中",
+  "thinkingDone": "思考完了",
+  "showThinking": "詳細を表示",
+  "hideThinking": "詳細を隠す",
+  "thinkingPlaceholder": "Agent がリクエストを分析し、次のステップを準備しています。"
 }

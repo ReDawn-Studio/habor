@@ -159,5 +159,11 @@
   "addProvider": "제공자 추가",
   "providerName": "제공자 이름",
   "apiKey": "API 키",
-  "saveProvider": "저장"
+  "saveProvider": "저장",
+  "thinking": "사고 과정",
+  "thinkingLive": "생각 중",
+  "thinkingDone": "생각 완료",
+  "showThinking": "세부 정보 표시",
+  "hideThinking": "세부 정보 숨기기",
+  "thinkingPlaceholder": "에이전트가 요청을 분석하고 다음 단계를 준비하고 있습니다."
 }

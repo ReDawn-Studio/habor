@@ -29,7 +29,7 @@ test("desktop service keeps workspace trust and file paths bounded", async () =>
 
 test("desktop service continues a task through the shared Router session", async () => {
   const root = await mkdtemp(join(tmpdir(), "habor-app-server-task-"));
-  const adapter = { id: "dsh-acp", harnessName: "Mock", models: ["DeepSeek V4 Flash"], protocol: "acp", isAvailable: async () => true, createSession: async (options) => ({ id: "mock-session", adapterId: "dsh-acp", model: options.model, cwd: options.cwd, prompt: async function* () { yield { type: "message", text: "mock assistant reply", ts: Date.now(), sessionId: "mock-session", adapterId: "dsh-acp", model: options.model }; yield { type: "done", ts: Date.now(), sessionId: "mock-session", adapterId: "dsh-acp", model: options.model }; }, cancel: async () => {}, close: async () => {} }) };
+  const adapter = { id: "dsh-acp", harnessName: "Mock", models: ["DeepSeek V4 Flash"], protocol: "acp", isAvailable: async () => true, createSession: async (options) => ({ id: "mock-session", adapterId: "dsh-acp", model: options.model, cwd: options.cwd, prompt: async function* () { yield { type: "thinking", thinking: "mock reasoning", ts: Date.now(), sessionId: "mock-session", adapterId: "dsh-acp", model: options.model }; yield { type: "message", text: "mock assistant reply", ts: Date.now(), sessionId: "mock-session", adapterId: "dsh-acp", model: options.model }; yield { type: "done", ts: Date.now(), sessionId: "mock-session", adapterId: "dsh-acp", model: options.model }; }, cancel: async () => {}, close: async () => {} }) };
   const service = new DesktopService({ stateDir: join(root, ".state"), adapters: [adapter] });
   try {
     const opened = await service.call("workspace.open", { path: root });
@@ -41,6 +41,7 @@ test("desktop service continues a task through the shared Router session", async
     const snapshot = await service.call("snapshot");
     const saved = snapshot.tasks.find((item) => item.id === task.id);
     assert.ok(saved.conversation.some((turn) => turn.text === "mock assistant reply"));
+    assert.equal(saved.meta.desktop.thinking, "mock reasoning");
   } finally {
     await service.close();
     await rm(root, { recursive: true, force: true });
