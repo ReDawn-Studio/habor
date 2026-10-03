@@ -68,7 +68,7 @@ export function App() {
   useEffect(() => { const key = (event) => { if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setCommandOpen(true); } }; window.addEventListener("keydown",key); return () => window.removeEventListener("keydown",key); }, []);
 
   async function trust() { try { await rpc("workspace.trust", { path:snapshot.cwd }); await refresh(); } catch (cause) { setError(cause.message); } }
-  async function createTask(text) {
+  async function createTask(text = draft) {
     if (!text.trim() || !model) return; setBusy(true);
     try { const result=await rpc("tasks.create",{title:text.trim().slice(0,90),model,permission}); setTaskId(result.id); setDraft(""); await send(result.id,text.trim()); } catch (cause) { setError(cause.message); } finally { setBusy(false); }
   }
